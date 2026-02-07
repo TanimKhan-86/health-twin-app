@@ -1,0 +1,94 @@
+import React, { useState } from "react";
+import { View, Text, TouchableOpacity, Image } from "react-native";
+import { ScreenLayout } from "../../components/ScreenLayout";
+import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "../../components/ui/Card";
+import { Input } from "../../components/ui/Input";
+import { Button } from "../../components/ui/Button";
+import { Mail, Lock, CircuitBoard } from "lucide-react-native";
+
+export default function SignInScreen({ navigation }: any) {
+    const [email, setEmail] = useState("");
+    const [password, setPassword] = useState("");
+    const [isLoading, setIsLoading] = useState(false);
+
+    const handleLogin = () => {
+        setIsLoading(true);
+        // Simulate login
+        setTimeout(() => {
+            setIsLoading(false);
+            navigation.replace("Main");
+        }, 1500);
+    };
+
+    return (
+        <ScreenLayout gradientBackground className="justify-center p-6">
+            <View className="mb-10 items-center">
+                {/* Logo Area */}
+                <View className="h-24 w-24 items-center justify-center rounded-3xl bg-brand-primary shadow-xl shadow-brand-primary/30 mb-6">
+                    <CircuitBoard size={48} color="#ffffff" />
+                </View>
+                <Text className="text-3xl font-bold text-slate-900">HealthTwin AI</Text>
+                <Text className="mt-2 text-brand-primary font-medium">Your Digital Health Companion</Text>
+            </View>
+
+            <View className="w-full bg-white/80 p-6 rounded-3xl shadow-lg shadow-purple-100 border border-white">
+                <View className="mb-6">
+                    <Text className="text-2xl font-bold text-center text-slate-800">Welcome Back</Text>
+                </View>
+
+                <View className="space-y-4">
+                    <Input
+                        placeholder="Email"
+                        value={email}
+                        onChangeText={setEmail}
+                        autoCapitalize="none"
+                        keyboardType="email-address"
+                        className="bg-purple-50/50 border-purple-100 text-slate-800"
+                        placeholderTextColor="#94a3b8"
+                    />
+                    <Input
+                        placeholder="Password"
+                        value={password}
+                        onChangeText={setPassword}
+                        secureTextEntry
+                        className="bg-purple-50/50 border-purple-100 text-slate-800"
+                        placeholderTextColor="#94a3b8"
+                    />
+                    <TouchableOpacity onPress={() => console.log("Forgot password")}>
+                        <Text className="text-right text-sm text-brand-primary font-medium">
+                            Forgot Password?
+                        </Text>
+                    </TouchableOpacity>
+                </View>
+
+                <View className="mt-8 space-y-4">
+                    <Button
+                        label={isLoading ? "Signing in..." : "Sign In"}
+                        onPress={handleLogin}
+                        disabled={isLoading}
+                        className="w-full bg-brand-primary shadow-lg shadow-brand-primary/25 rounded-xl h-14"
+                        labelClasses="text-lg font-semibold"
+                    />
+
+                    <View className="flex-row items-center space-x-2 my-2">
+                        <View className="h-px flex-1 bg-slate-200" />
+                        <Text className="text-xs text-slate-400 font-medium">OR CONTINUE WITH</Text>
+                        <View className="h-px flex-1 bg-slate-200" />
+                    </View>
+
+                    <View className="flex-row space-x-3 w-full justify-center">
+                        <Button variant="outline" className="flex-1 border-slate-200" label="Google" labelClasses="text-slate-600" />
+                        <Button variant="outline" className="flex-1 border-slate-200" label="Apple" labelClasses="text-slate-600" />
+                    </View>
+                </View>
+            </View>
+
+            <View className="mt-8 flex-row justify-center space-x-1">
+                <Text className="text-slate-500">Don't have an account?</Text>
+                <TouchableOpacity onPress={() => navigation.navigate("SignUp")}>
+                    <Text className="font-bold text-brand-primary">Sign Up</Text>
+                </TouchableOpacity>
+            </View>
+        </ScreenLayout>
+    );
+}
