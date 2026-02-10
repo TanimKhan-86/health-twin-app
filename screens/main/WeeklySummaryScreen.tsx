@@ -1,27 +1,83 @@
-import React from "react";
-import { View, Text, ScrollView, TouchableOpacity } from "react-native";
+import React, { useState, useCallback } from "react";
+import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator } from "react-native";
 import { ScreenLayout } from "../../components/ScreenLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/Card";
-import { Button } from "../../components/ui/Button";
-import { ArrowLeft, MessageSquare, CheckCircle } from "lucide-react-native";
+import { ArrowLeft, CheckCircle, Moon, Zap, TrendingUp, TrendingDown, Minus } from "lucide-react-native";
 import { DigitalTwinAvatar } from "../../components/DigitalTwinAvatar";
+import { useFocusEffect } from "@react-navigation/native";
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { NarrativeService } from "../../lib/narrative/index"; // Import direct
+import { WeeklyAnalytics } from "../../lib/analytics";
+import { getToday, getDaysAgo, formatDate } from "../../lib/demoData";
 
 export default function WeeklySummaryScreen({ navigation }: any) {
+    const [loading, setLoading] = useState(true);
+    const [story, setStory] = useState("");
+    const [analytics, setAnalytics] = useState<WeeklyAnalytics | null>(null);
+
+    useFocusEffect(
+        useCallback(() => {
+            loadSummary();
+        }, [])
+    );
+
+    const loadSummary = async () => {
+        setLoading(true);
+        try {
+            const userId = await AsyncStorage.getItem('USER_ID');
+            if (!userId) return;
+
+            const endDate = getToday();
+            const startDate = getDaysAgo(6); // Last 7 days
+
+            const result = await NarrativeService.generateWeeklyStory(userId, startDate, endDate);
+            setStory(result.story);
+            setAnalytics(result.analytics);
+
+        } catch (e) {
+            console.error("Failed to load summary", e);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    if (loading) {
+        return (
+            <ScreenLayout gradientBackground>
+                <View className="flex-1 items-center justify-center">
+                    <ActivityIndicator size="large" color="white" />
+                </View>
+            </ScreenLayout>
+        );
+    }
+
+    // Helper to determine trend icon/color
+    const getTrendIcon = (trend: 'improving' | 'declining' | 'stable') => {
+        if (trend === 'improving') return { icon: TrendingUp, color: '#10b981', bg: 'bg-emerald-100' };
+        if (trend === 'declining') return { icon: TrendingDown, color: '#ef4444', bg: 'bg-red-100' };
+        return { icon: Minus, color: '#6b7280', bg: 'bg-gray-100' };
+    };
+
     return (
         <ScreenLayout gradientBackground>
             <View className="flex-1">
                 {/* Header */}
                 <View className="p-4 pt-2 flex-row items-center space-x-4">
-                    <TouchableOpacity onPress={() => navigation.goBack()} className="w-10 h-10 rounded-full bg-white/20 items-center justify-center">
-                        <ArrowLeft color="white" size={24} />
+                    <TouchableOpacity onPress={() => navigation.goBack()} className="flex-row items-center bg-white/20 px-3 py-2 rounded-full">
+                        <ArrowLeft color="white" size={20} />
+                        <Text className="text-white font-bold ml-2">Back</Text>
                     </TouchableOpacity>
                     <View>
                         <Text className="text-white text-xl font-bold">Weekly Report</Text>
-                        <Text className="text-teal-200 text-xs">Feb 12 - Feb 18</Text>
+                        <Text className="text-teal-200 text-xs">
+                            {analytics ? `${analytics.week_start.slice(5)} - ${analytics.week_end.slice(5)}` : "Loading..."}
+                        </Text>
                     </View>
                 </View>
 
                 <ScrollView contentContainerStyle={{ padding: 16 }}>
+
+                    {/* Narrative Card */}
                     <Card className="mb-6 bg-white/95 backdrop-blur-sm border-white/20">
                         <CardHeader>
                             <CardTitle className="text-center text-teal-800">Your Twin's Analysis</CardTitle>
@@ -31,33 +87,64 @@ export default function WeeklySummaryScreen({ navigation }: any) {
                                 <DigitalTwinAvatar />
                             </View>
                             <View className="bg-teal-50 p-4 rounded-xl border border-teal-100 w-full mt-4">
-                                <Text className="text-slate-700 leading-relaxed">
-                                    "You've had a strong week! Your activity levels are up 15% compared to last week. Sleep consistency has improved, contributing to higher energy scores. Keep focusing on that hydration!"
+                                <Text className="text-slate-700 leading-relaxed font-medium italic">
+                                    "{story}"
                                 </Text>
                             </View>
                         </CardContent>
                     </Card>
 
                     <Text className="text-white font-semibold mb-3 ml-1">Key Highlights</Text>
-                    <View className="space-y-3">
-                        {[
-                            { text: "Reached daily step goal 5/7 days", icon: CheckCircle, color: "#059669", bg: "bg-emerald-100" },
-                            { text: "Sleep average increased by 45 mins", icon: Moon, color: "#6366f1", bg: "bg-indigo-100" }, // Icon not imported but generic logic works
-                            { text: "Energy levels peaked on Wednesday", icon: Zap, color: "#f59e0b", bg: "bg-amber-100" }
-                        ].map((item, i) => ( // Using Zap from generic placeholder logic if needed or just CheckCircle
-                            <Card key={i} className="flex-row items-center p-4">
-                                <View className={`p-2 rounded-full mr-3 ${item.bg}`}>
-                                    <item.icon size={20} color={item.color} />
+
+                    {analytics && (
+                        <View className="space-y-3">
+                            {/* Energy Trend */}
+                            <Card className="flex-row items-center p-4">
+                                <View className={`p-2 rounded-full mr-3 ${getTrendIcon(analytics.energy_trend).bg}`}>
+                                    {React.createElement(getTrendIcon(analytics.energy_trend).icon, {
+                                        size: 20,
+                                        color: getTrendIcon(analytics.energy_trend).color
+                                    })}
                                 </View>
-                                <Text className="text-slate-700 font-medium flex-1">{item.text}</Text>
+                                <View className="flex-1">
+                                    <Text className="text-slate-800 font-bold">Energy Trend</Text>
+                                    <Text className="text-slate-500 text-xs">
+                                        Avg Score: {analytics.avg_energy_score} ({analytics.energy_trend})
+                                    </Text>
+                                </View>
                             </Card>
-                        ))}
-                    </View>
+
+                            {/* Sleep & Mood Correlation */}
+                            <Card className="flex-row items-center p-4">
+                                <View className="p-2 rounded-full mr-3 bg-indigo-100">
+                                    <Moon size={20} color="#6366f1" />
+                                </View>
+                                <View className="flex-1">
+                                    <Text className="text-slate-800 font-bold">Sleep & Mood</Text>
+                                    <Text className="text-slate-500 text-xs">
+                                        {analytics.sleep_mood_correlation}
+                                    </Text>
+                                </View>
+                            </Card>
+
+                            {/* Best Day */}
+                            {analytics.best_energy_day && (
+                                <Card className="flex-row items-center p-4">
+                                    <View className="p-2 rounded-full mr-3 bg-amber-100">
+                                        <Zap size={20} color="#f59e0b" />
+                                    </View>
+                                    <View className="flex-1">
+                                        <Text className="text-slate-800 font-bold">Peak Performance</Text>
+                                        <Text className="text-slate-500 text-xs">
+                                            Best day was {analytics.best_energy_day.date} (Score: {Math.round(analytics.best_energy_day.score)})
+                                        </Text>
+                                    </View>
+                                </Card>
+                            )}
+                        </View>
+                    )}
                 </ScrollView>
             </View>
         </ScreenLayout>
     );
 }
-
-// Helper icons
-import { Moon, Zap } from "lucide-react-native";

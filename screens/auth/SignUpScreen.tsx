@@ -1,21 +1,40 @@
 import React, { useState } from "react";
-import { View, Text, TouchableOpacity, ScrollView } from "react-native";
+import { View, Text, TouchableOpacity, ScrollView, Image, Alert } from "react-native";
 import { ScreenLayout } from "../../components/ScreenLayout";
 import { Input } from "../../components/ui/Input";
 import { Button } from "../../components/ui/Button";
-import { Heart, ArrowLeft, Check } from "lucide-react-native";
+import { Heart, ArrowLeft, Check, Camera, Upload } from "lucide-react-native";
+import * as ImagePicker from 'expo-image-picker';
+import { UserService } from "../../lib/services";
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export default function SignUpScreen({ navigation }: any) {
     const [step, setStep] = useState(1);
+    const [isLoading, setIsLoading] = useState(false);
     const [formData, setFormData] = useState({
         firstName: "",
         lastName: "",
         email: "",
         password: "",
-        confirmPassword: ""
+        confirmPassword: "",
+        age: "",
+        height: "",
+        weight: "",
+        profileImage: null as string | null
     });
 
     const handleNext = () => {
+        if (step === 1) {
+            if (!formData.firstName || !formData.email || !formData.password) {
+                Alert.alert("Missing Fields", "Please fill in all required fields.");
+                return;
+            }
+            if (formData.password !== formData.confirmPassword) {
+                Alert.alert("Password Mismatch", "Passwords do not match.");
+                return;
+            }
+        }
+
         if (step < 3) setStep(step + 1);
         else handleSignup();
     };
@@ -25,8 +44,51 @@ export default function SignUpScreen({ navigation }: any) {
         else navigation.goBack();
     };
 
-    const handleSignup = () => {
-        navigation.replace("Main");
+    const pickImage = async () => {
+        const result = await ImagePicker.launchImageLibraryAsync({
+            mediaTypes: ImagePicker.MediaTypeOptions.Images,
+            allowsEditing: true,
+            aspect: [1, 1],
+            quality: 0.5,
+        });
+
+        if (!result.canceled) {
+            setFormData({ ...formData, profileImage: result.assets[0].uri });
+        }
+    };
+
+    const handleSignup = async () => {
+        setIsLoading(true);
+        try {
+            const userId = `user_${Date.now()}`; // Simple ID generation
+
+            await UserService.upsertUser({
+                user_id: userId,
+                name: `${formData.firstName} ${formData.lastName}`,
+                email: formData.email,
+                password: formData.password,
+                profile_image: formData.profileImage || undefined,
+                study_mode: 'both',
+                consent_given: true, // Implicit for demo
+                settings_json: JSON.stringify({
+                    age: formData.age,
+                    height: formData.height,
+                    weight: formData.weight
+                })
+            });
+
+            // Persist session
+            await AsyncStorage.setItem('USER_ID', userId);
+
+            Alert.alert("Success", "Account created successfully!", [
+                { text: "OK", onPress: () => navigation.replace("Main") }
+            ]);
+        } catch (error) {
+            console.error(error);
+            Alert.alert("Error", "Failed to create account. Email might be in use.");
+        } finally {
+            setIsLoading(false);
+        }
     };
 
     // Helper to render the circular steps
@@ -38,7 +100,7 @@ export default function SignUpScreen({ navigation }: any) {
             <View className="items-center justify-center">
                 <View
                     className={`h-8 w-8 rounded-full items-center justify-center border ${isActive ? "border-brand-primary bg-purple-50" :
-                            isCompleted ? "bg-brand-primary border-brand-primary" : "border-slate-300 bg-white"
+                        isCompleted ? "bg-brand-primary border-brand-primary" : "border-slate-300 bg-white"
                         }`}
                 >
                     {isCompleted ? (
@@ -112,7 +174,7 @@ export default function SignUpScreen({ navigation }: any) {
                         />
 
                         <Input
-                            placeholder="Demo password (for this profile only)"
+                            placeholder="Password"
                             value={formData.password}
                             onChangeText={(t) => setFormData({ ...formData, password: t })}
                             secureTextEntry
@@ -128,10 +190,6 @@ export default function SignUpScreen({ navigation }: any) {
                             className="bg-purple-50/50 border-purple-100/80 rounded-2xl h-14"
                             placeholderTextColor="#94a3b8"
                         />
-
-                        <Text className="text-center text-slate-500 text-sm mt-2">
-                            This is a prototype demo using simulated data.
-                        </Text>
                     </View>
                 )}
 
@@ -140,6 +198,8 @@ export default function SignUpScreen({ navigation }: any) {
                         <Text className="text-center text-slate-600 mb-2">Tell us about yourself for the simulation</Text>
                         <Input
                             placeholder="Age"
+                            value={formData.age}
+                            onChangeText={(t) => setFormData({ ...formData, age: t })}
                             keyboardType="numeric"
                             className="bg-purple-50/50 border-purple-100/80 rounded-2xl h-14"
                             placeholderTextColor="#94a3b8"
@@ -148,6 +208,8 @@ export default function SignUpScreen({ navigation }: any) {
                             <Input
                                 containerClassName="flex-1"
                                 placeholder="Height (cm)"
+                                value={formData.height}
+                                onChangeText={(t) => setFormData({ ...formData, height: t })}
                                 keyboardType="numeric"
                                 className="bg-purple-50/50 border-purple-100/80 rounded-2xl h-14"
                                 placeholderTextColor="#94a3b8"
@@ -155,6 +217,8 @@ export default function SignUpScreen({ navigation }: any) {
                             <Input
                                 containerClassName="flex-1"
                                 placeholder="Weight (kg)"
+                                value={formData.weight}
+                                onChangeText={(t) => setFormData({ ...formData, weight: t })}
                                 keyboardType="numeric"
                                 className="bg-purple-50/50 border-purple-100/80 rounded-2xl h-14"
                                 placeholderTextColor="#94a3b8"
@@ -162,15 +226,37 @@ export default function SignUpScreen({ navigation }: any) {
                         </View>
                     </View>
                 )}
+
                 {step === 3 && (
-                    <View className="space-y-4 items-center py-8">
-                        <View className="h-24 w-24 bg-green-100 rounded-full items-center justify-center mb-4">
-                            <Check size={40} color="#10b981" />
-                        </View>
-                        <Text className="text-xl font-bold text-slate-800">All Set!</Text>
-                        <Text className="text-center text-slate-500">
-                            Your digital twin is ready to be initialized.
+                    <View className="space-y-6 items-center py-4">
+                        <Text className="text-xl font-bold text-slate-800">Profile Picture</Text>
+                        <Text className="text-center text-slate-500 px-4">
+                            Upload a photo to personalize your dashboard and digital twin.
                         </Text>
+
+                        <TouchableOpacity
+                            onPress={pickImage}
+                            className="h-40 w-40 rounded-full bg-purple-50 border-2 border-dashed border-purple-200 items-center justify-center overflow-hidden"
+                        >
+                            {formData.profileImage ? (
+                                <Image
+                                    source={{ uri: formData.profileImage }}
+                                    className="h-full w-full"
+                                    resizeMode="cover"
+                                />
+                            ) : (
+                                <View className="items-center space-y-2">
+                                    <Camera size={32} color="#a855f7" />
+                                    <Text className="text-xs text-brand-primary font-medium">Tap to Upload</Text>
+                                </View>
+                            )}
+                        </TouchableOpacity>
+
+                        {formData.profileImage && (
+                            <TouchableOpacity onPress={() => setFormData({ ...formData, profileImage: null })}>
+                                <Text className="text-red-500 text-sm">Remove Photo</Text>
+                            </TouchableOpacity>
+                        )}
                     </View>
                 )}
             </ScrollView>
@@ -178,18 +264,27 @@ export default function SignUpScreen({ navigation }: any) {
             {/* Bottom Actions */}
             <View className="pb-10 pt-4">
                 <Button
-                    label="Continue"
+                    label={isLoading ? "Creating Profile..." : (step === 3 ? "Complete Sign Up" : "Continue")}
                     onPress={handleNext}
+                    disabled={isLoading}
                     className="w-full bg-brand-primary h-14 rounded-full shadow-lg shadow-brand-primary/30"
                     labelClasses="text-lg font-semibold"
                 />
 
-                <View className="mt-6 flex-row justify-center space-x-1">
-                    <Text className="text-slate-500">Already have a profile?</Text>
-                    <TouchableOpacity onPress={() => navigation.navigate("SignIn")}>
-                        <Text className="font-bold text-brand-secondary">Sign In</Text>
+                {step === 1 && (
+                    <View className="mt-6 flex-row justify-center space-x-1">
+                        <Text className="text-slate-500">Already have a profile?</Text>
+                        <TouchableOpacity onPress={() => navigation.navigate("SignIn")}>
+                            <Text className="font-bold text-brand-secondary">Sign In</Text>
+                        </TouchableOpacity>
+                    </View>
+                )}
+
+                {step > 1 && (
+                    <TouchableOpacity onPress={handleBack} className="mt-4 items-center" disabled={isLoading}>
+                        <Text className="text-slate-400 font-medium">Back</Text>
                     </TouchableOpacity>
-                </View>
+                )}
             </View>
 
         </ScreenLayout>

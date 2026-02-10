@@ -18,8 +18,8 @@ export function ScreenLayout({
         console.log("ScreenLayout: Rendering Gradient Background (Light Theme)");
         return (
             <LinearGradient
-                // White -> Light Purple -> Light Pink
-                colors={["#ffffff", "#f3e8ff", "#fae8ff"]}
+                // Purple (Primary) -> Light Purple -> White
+                colors={["#8b5cf6", "#e9d5ff", "#ffffff"]}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 1 }}
                 style={{ flex: 1 }}
