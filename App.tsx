@@ -12,10 +12,12 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 // Database & Helpers
 import db from './lib/database';
 import { DemoDataHelper } from './lib/demoData';
+import { HealthService, UserService } from './lib/services'; // Added UserService
 
 // Screens
 import SignInScreen from './screens/auth/SignInScreen';
 import SignUpScreen from './screens/auth/SignUpScreen';
+import DailyLogScreen from './screens/main/DailyLogScreen'; // Added DailyLogScreen
 import DashboardScreen from './screens/main/DashboardScreen';
 import DataEntryScreen from './screens/main/DataEntryScreen';
 import WhatIfScreen from './screens/main/WhatIfScreen';
@@ -23,6 +25,7 @@ import AchievementsScreen from './screens/main/AchievementsScreen';
 import WeeklySummaryScreen from './screens/main/WeeklySummaryScreen';
 import AnalyticsScreen from './screens/main/AnalyticsScreen';
 import SettingsScreen from './screens/profile/SettingsScreen';
+import DatabaseViewerScreen from './screens/dev/DatabaseViewerScreen';
 import { ToastProvider } from './components/ui/Toast';
 
 const Stack = createNativeStackNavigator();
@@ -48,10 +51,31 @@ export default function App() {
         }
 
         // Check Auth State
-        // const userId = await AsyncStorage.getItem('USER_ID');
-        // if (userId) {
-        //   setInitialRoute("Main");
-        // }
+        const userId = await AsyncStorage.getItem('USER_ID');
+
+        if (userId) {
+          // Verify user exists in DB (Fix for zombie sessions)
+          const user = await UserService.getUser(userId);
+
+          if (!user) {
+            console.log("User not found in DB, clearing session.");
+            await AsyncStorage.removeItem('USER_ID');
+            setInitialRoute("SignIn");
+          } else {
+            // Check if data exists for today
+            const today = new Date().toISOString().split('T')[0];
+            const entry = await HealthService.getHealthEntry(userId, today);
+
+            if (entry) {
+              setInitialRoute("Main");
+            } else {
+              // No data for today, go to Daily Log
+              setInitialRoute("DailyLog");
+            }
+          }
+        } else {
+          setInitialRoute("SignIn");
+        }
 
       } catch (e) {
         console.warn('Initialization Error:', e);
@@ -83,8 +107,14 @@ export default function App() {
   if (dbError) { // Changed condition
     return (
       <View className="flex-1 items-center justify-center bg-slate-900 p-8"> {/* Updated styling */}
-        <Text className="text-red-400 text-xl font-bold mb-2">Initialization Failed</Text> {/* Updated text and styling */}
-        <Text className="text-slate-400 text-center">{dbError.message}</Text> {/* Display error message */}
+        <Text className="text-red-400 text-xl font-bold mb-4">Initialization Failed</Text> {/* Updated text and styling */}
+        <Text className="text-slate-200 text-center text-lg mb-2">Database Locked</Text>
+        <Text className="text-slate-400 text-center mb-6">
+          {dbError.message.includes("Access Handle")
+            ? "This app is open in another tab. Please close other tabs and reload."
+            : dbError.message}
+        </Text>
+        <Text className="text-slate-500 text-sm text-center">Reference: {dbError.name}</Text>
       </View>
     );
   }
@@ -100,6 +130,7 @@ export default function App() {
           >
             <Stack.Screen name="SignIn" component={SignInScreen} />
             <Stack.Screen name="SignUp" component={SignUpScreen} />
+            <Stack.Screen name="DailyLog" component={DailyLogScreen} />
             <Stack.Screen name="Main" component={DashboardScreen} />
 
             {/* Feature screens */}
@@ -109,6 +140,7 @@ export default function App() {
             <Stack.Screen name="WeeklySummary" component={WeeklySummaryScreen} />
             <Stack.Screen name="Analytics" component={AnalyticsScreen} />
             <Stack.Screen name="Settings" component={SettingsScreen} />
+            <Stack.Screen name="DatabaseViewer" component={DatabaseViewerScreen} />
           </Stack.Navigator>
         </NavigationContainer>
         <StatusBar style="light" /> {/* Added StatusBar */}
