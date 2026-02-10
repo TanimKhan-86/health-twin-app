@@ -1,23 +1,39 @@
 import React, { useState } from "react";
-import { View, Text, TouchableOpacity, Image } from "react-native";
+import { View, Text, TouchableOpacity, Image, Alert } from "react-native";
 import { ScreenLayout } from "../../components/ScreenLayout";
-import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "../../components/ui/Card";
 import { Input } from "../../components/ui/Input";
 import { Button } from "../../components/ui/Button";
-import { Mail, Lock, CircuitBoard } from "lucide-react-native";
+import { CircuitBoard } from "lucide-react-native";
+import { UserService } from "../../lib/services";
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export default function SignInScreen({ navigation }: any) {
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
     const [isLoading, setIsLoading] = useState(false);
 
-    const handleLogin = () => {
+    const handleLogin = async () => {
+        if (!email || !password) {
+            Alert.alert("Error", "Please enter both email and password.");
+            return;
+        }
+
         setIsLoading(true);
-        // Simulate login
-        setTimeout(() => {
+        try {
+            const user = await UserService.authenticateUser(email, password);
+
+            if (user && user.user_id) {
+                await AsyncStorage.setItem('USER_ID', user.user_id);
+                navigation.replace("Main");
+            } else {
+                Alert.alert("Invalid Credentials", "Please check your email and password.");
+            }
+        } catch (error) {
+            console.error(error);
+            Alert.alert("Error", "Something went wrong. Please try again.");
+        } finally {
             setIsLoading(false);
-            navigation.replace("Main");
-        }, 1500);
+        }
     };
 
     return (

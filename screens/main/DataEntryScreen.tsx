@@ -167,8 +167,9 @@ export default function DataEntryScreen({ navigation }: any) {
             <View className="flex-1">
                 {/* Header */}
                 <View className="p-4 pt-2">
-                    <TouchableOpacity onPress={() => navigation.goBack()} className="mb-4 w-10 h-10 rounded-full bg-white/20 items-center justify-center">
-                        <ArrowLeft color="white" size={24} />
+                    <TouchableOpacity onPress={() => navigation.goBack()} className="mb-4 flex-row items-center bg-white/20 px-3 py-2 rounded-full self-start">
+                        <ArrowLeft color="white" size={20} />
+                        <Text className="text-white font-bold ml-2">Back</Text>
                     </TouchableOpacity>
                     <Text className="text-white text-2xl font-bold">Daily Log</Text>
                     <View className="flex-row items-center space-x-2 mt-1">

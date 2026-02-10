@@ -3,7 +3,7 @@ import { View, Text, ScrollView, TouchableOpacity } from "react-native";
 import { ScreenLayout } from "../../components/ScreenLayout";
 import { DigitalTwinAvatar } from "../../components/DigitalTwinAvatar";
 import { Card, CardContent } from "../../components/ui/Card";
-import { Activity, Heart, Moon, Wind, Droplets } from "lucide-react-native";
+import { Activity, Heart, Moon, Wind, Droplets, Trophy } from "lucide-react-native";
 
 interface MetricCardProps {
     icon: React.ReactNode;
@@ -29,7 +29,40 @@ function MetricCard({ icon, label, value, subValue, color }: MetricCardProps) {
     );
 }
 
+import { useState, useCallback } from "react";
+import { useFocusEffect } from "@react-navigation/native";
+import { Image } from "react-native";
+import { StreakService, UserService, User } from "../../lib/services"; // Import services
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+// ... inside component ...
 export default function DashboardScreen({ navigation }: any) {
+    const [streak, setStreak] = useState(0);
+    const [user, setUser] = useState<User | null>(null);
+
+    useFocusEffect(
+        useCallback(() => {
+            loadData();
+        }, [])
+    );
+
+    const loadData = async () => {
+        try {
+            const userId = await AsyncStorage.getItem('USER_ID');
+            const targetUserId = userId || 'demo-user-123'; // Fallback to demo if auth bypassed 
+
+            // Load User Profile
+            const userData = await UserService.getUser(targetUserId);
+            if (userData) setUser(userData);
+
+            // Load Streak
+            const s = await StreakService.getStreak(targetUserId);
+            if (s) setStreak(s.current_streak);
+        } catch (e) {
+            console.error(e);
+        }
+    };
+
     return (
         <ScreenLayout gradientBackground>
             <ScrollView className="flex-1" contentContainerStyle={{ paddingBottom: 100 }}>
@@ -37,10 +70,31 @@ export default function DashboardScreen({ navigation }: any) {
                 <View className="p-6 flex-row justify-between items-center">
                     <View>
                         <Text className="text-teal-100 font-medium">Good Morning,</Text>
-                        <Text className="text-2xl font-bold text-white">Sakif</Text>
+                        <Text className="text-2xl font-bold text-white">
+                            {user?.name?.split(' ')[0] || "Sakif"}
+                        </Text>
                     </View>
-                    <View className="h-10 w-10 rounded-full bg-white/20 items-center justify-center border border-white/30">
-                        <Text className="text-white font-bold">SM</Text>
+
+                    <View className="flex-row space-x-3">
+                        {/* Streak Badge */}
+                        <TouchableOpacity
+                            onPress={() => navigation.navigate('Achievements')}
+                            className="h-10 px-3 rounded-full bg-orange-500/20 border border-orange-500/50 flex-row items-center space-x-1"
+                        >
+                            <Text className="text-lg">🔥</Text>
+                            <Text className="text-white font-bold">{streak}</Text>
+                        </TouchableOpacity>
+
+                        {/* Profile Avatar */}
+                        <View className="h-10 w-10 rounded-full bg-white/20 items-center justify-center border border-white/30 overflow-hidden">
+                            {user?.profile_image ? (
+                                <Image source={{ uri: user.profile_image }} className="h-full w-full" resizeMode="cover" />
+                            ) : (
+                                <Text className="text-white font-bold">
+                                    {user?.name ? user.name.substring(0, 2).toUpperCase() : "SM"}
+                                </Text>
+                            )}
+                        </View>
                     </View>
                 </View>
 
@@ -93,6 +147,23 @@ export default function DashboardScreen({ navigation }: any) {
                     </View>
                 </View>
 
+                {/* Quick Actions / Navigation */}
+                <View className="p-6 pt-0 flex-row justify-between">
+                    <TouchableOpacity
+                        className="bg-purple-600/20 p-4 rounded-2xl flex-1 mr-2 items-center border border-purple-500/30"
+                        onPress={() => navigation.navigate('WhatIf')}
+                    >
+                        <Text className="text-purple-200 font-bold">🔮 Future You</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                        className="bg-teal-600/20 p-4 rounded-2xl flex-1 ml-2 items-center border border-teal-500/30"
+                        onPress={() => navigation.navigate('Analytics')}
+                    >
+                        <Text className="text-teal-200 font-bold">📊 Analytics</Text>
+                    </TouchableOpacity>
+                </View>
+
                 {/* Action Buttons */}
                 <View className="p-4 mt-4 space-y-3">
                     <TouchableOpacity
@@ -124,6 +195,42 @@ export default function DashboardScreen({ navigation }: any) {
                             <View>
                                 <Text className="font-bold text-slate-800">What-If Scenarios</Text>
                                 <Text className="text-slate-500 text-xs">AI Predictions</Text>
+                            </View>
+                        </View>
+                        <View className="h-8 w-8 rounded-full bg-slate-100 items-center justify-center">
+                            <Text className="text-slate-400">arrow</Text>
+                        </View>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                        className="bg-white p-4 rounded-xl flex-row items-center justify-between shadow-sm active:bg-slate-50"
+                        onPress={() => navigation.navigate("Achievements")} // Navigate to achievements
+                    >
+                        <View className="flex-row items-center space-x-3">
+                            <View className="bg-amber-100 p-2 rounded-full">
+                                <Trophy size={20} color="#d97706" />
+                            </View>
+                            <View>
+                                <Text className="font-bold text-slate-800">Achievements</Text>
+                                <Text className="text-slate-500 text-xs">View your badges</Text>
+                            </View>
+                        </View>
+                        <View className="h-8 w-8 rounded-full bg-slate-100 items-center justify-center">
+                            <Text className="text-slate-400">arrow</Text>
+                        </View>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                        className="bg-white p-4 rounded-xl flex-row items-center justify-between shadow-sm active:bg-slate-50"
+                        onPress={() => navigation.navigate("WeeklySummary")}
+                    >
+                        <View className="flex-row items-center space-x-3">
+                            <View className="bg-emerald-100 p-2 rounded-full">
+                                <Activity size={20} color="#10b981" />
+                            </View>
+                            <View>
+                                <Text className="font-bold text-slate-800">Weekly Summary</Text>
+                                <Text className="text-slate-500 text-xs">Your Twin's Report</Text>
                             </View>
                         </View>
                         <View className="h-8 w-8 rounded-full bg-slate-100 items-center justify-center">
