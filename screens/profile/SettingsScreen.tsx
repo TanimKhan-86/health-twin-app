@@ -4,7 +4,7 @@ import { ScreenLayout } from "../../components/ScreenLayout";
 import { Button } from "../../components/ui/Button";
 import { useToast } from "../../components/ui/Toast";
 import {
-    User, Settings, Bell, Moon, Download, Trash2, LogOut, ChevronRight, Shield
+    User, Settings, Bell, Moon, Download, Trash2, LogOut, ChevronRight, Shield, Database
 } from "lucide-react-native";
 import { UserService, HealthService, MoodService, AchievementService } from "../../lib/services";
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -139,6 +139,39 @@ export default function SettingsScreen({ navigation }: any) {
         );
     };
 
+    const handleResetToday = async () => {
+        Alert.alert(
+            "Reset Today",
+            "Clear data for today only? This allows you to test the Daily Log screen again.",
+            [
+                { text: "Cancel", style: "cancel" },
+                {
+                    text: "Reset",
+                    style: "destructive",
+                    onPress: async () => {
+                        try {
+                            if (user?.user_id) {
+                                const db = (await import('../../lib/database')).default.getDB();
+                                const today = new Date().toISOString().split('T')[0];
+                                // Delete today's entries
+                                await db.runAsync('DELETE FROM health_entries WHERE user_id = ? AND date = ?', [user.user_id, today]);
+                                await db.runAsync('DELETE FROM moods WHERE user_id = ? AND date = ?', [user.user_id, today]);
+
+                                showToast("Data cleared. Restarting...", "success");
+                                // Force reload or navigate
+                                navigation.dispatch(
+                                    CommonActions.reset({ index: 0, routes: [{ name: "DailyLog" }] })
+                                );
+                            }
+                        } catch (e) {
+                            showToast("Error resetting data", "error");
+                        }
+                    }
+                }
+            ]
+        );
+    };
+
     const handleDeleteAccount = async () => {
         Alert.alert(
             "Delete Account",
@@ -237,6 +270,16 @@ export default function SettingsScreen({ navigation }: any) {
                         icon={<Download size={20} color="#3b82f6" />}
                         label="Export Data (JSON)"
                         onPress={handleExportData}
+                    />
+                    <SettingItem
+                        icon={<Settings size={20} color="#f59e0b" />}
+                        label="Reset Today's Data (Debug)"
+                        onPress={handleResetToday}
+                    />
+                    <SettingItem
+                        icon={<Database size={20} color="#8b5cf6" />}
+                        label="View Database (Debug)"
+                        onPress={() => navigation.navigate("DatabaseViewer")}
                     />
                     <SettingItem
                         icon={<Trash2 size={20} color="#ef4444" />}
