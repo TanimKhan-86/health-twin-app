@@ -6,6 +6,7 @@ export function Card({ className, ...props }: ViewProps) {
         <View
             className={cn(
                 "rounded-2xl border border-slate-200 bg-white shadow-sm",
+                "dark:bg-slate-800 dark:border-slate-700",
                 className
             )}
             {...props}
@@ -25,7 +26,7 @@ export function CardTitle({ className, ...props }: TextProps & { children: React
     return (
         <Text
             className={cn(
-                "text-2xl font-semibold leading-none tracking-tight text-slate-900",
+                "text-2xl font-semibold leading-none tracking-tight text-slate-900 dark:text-slate-100",
                 className
             )}
             {...props as any}

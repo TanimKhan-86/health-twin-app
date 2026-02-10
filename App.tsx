@@ -22,6 +22,8 @@ import WhatIfScreen from './screens/main/WhatIfScreen';
 import AchievementsScreen from './screens/main/AchievementsScreen';
 import WeeklySummaryScreen from './screens/main/WeeklySummaryScreen';
 import AnalyticsScreen from './screens/main/AnalyticsScreen';
+import SettingsScreen from './screens/profile/SettingsScreen';
+import { ToastProvider } from './components/ui/Toast';
 
 const Stack = createNativeStackNavigator();
 
@@ -90,24 +92,27 @@ export default function App() {
   // Render app once database is ready
   return (
     <SafeAreaProvider>
-      <NavigationContainer>
-        <Stack.Navigator
-          initialRouteName={initialRoute} // Changed to initialRoute state
-          screenOptions={{ headerShown: false }}
-        >
-          <Stack.Screen name="SignIn" component={SignInScreen} />
-          <Stack.Screen name="SignUp" component={SignUpScreen} />
-          <Stack.Screen name="Main" component={DashboardScreen} />
+      <ToastProvider>
+        <NavigationContainer>
+          <Stack.Navigator
+            initialRouteName={initialRoute} // Changed to initialRoute state
+            screenOptions={{ headerShown: false }}
+          >
+            <Stack.Screen name="SignIn" component={SignInScreen} />
+            <Stack.Screen name="SignUp" component={SignUpScreen} />
+            <Stack.Screen name="Main" component={DashboardScreen} />
 
-          {/* Feature screens */}
-          <Stack.Screen name="DataEntry" component={DataEntryScreen} />
-          <Stack.Screen name="WhatIf" component={WhatIfScreen} />
-          <Stack.Screen name="Achievements" component={AchievementsScreen} />
-          <Stack.Screen name="WeeklySummary" component={WeeklySummaryScreen} />
-          <Stack.Screen name="Analytics" component={AnalyticsScreen} />
-        </Stack.Navigator>
-      </NavigationContainer>
-      <StatusBar style="light" /> {/* Added StatusBar */}
+            {/* Feature screens */}
+            <Stack.Screen name="DataEntry" component={DataEntryScreen} />
+            <Stack.Screen name="WhatIf" component={WhatIfScreen} />
+            <Stack.Screen name="Achievements" component={AchievementsScreen} />
+            <Stack.Screen name="WeeklySummary" component={WeeklySummaryScreen} />
+            <Stack.Screen name="Analytics" component={AnalyticsScreen} />
+            <Stack.Screen name="Settings" component={SettingsScreen} />
+          </Stack.Navigator>
+        </NavigationContainer>
+        <StatusBar style="light" /> {/* Added StatusBar */}
+      </ToastProvider>
     </SafeAreaProvider>
   );
 }

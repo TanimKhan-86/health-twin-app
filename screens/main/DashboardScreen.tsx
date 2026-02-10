@@ -15,14 +15,14 @@ interface MetricCardProps {
 
 function MetricCard({ icon, label, value, subValue, color }: MetricCardProps) {
     return (
-        <Card className="flex-1 m-1 bg-white/90 backdrop-blur-sm shadow-sm border-0">
+        <Card className="flex-1 m-1 bg-white/90 dark:bg-slate-800/90 backdrop-blur-sm shadow-sm border-0">
             <CardContent className="p-4 items-center space-y-2">
                 <View className={`p-2 rounded-full bg-opacity-10 ${color.replace("text-", "bg-")}`}>
                     {/* Clone element logic or just wrap icon. Lucide icons are components. */}
                     {icon}
                 </View>
-                <Text className="text-xl font-bold text-slate-800">{value}</Text>
-                <Text className="text-xs font-medium text-slate-500">{label}</Text>
+                <Text className="text-xl font-bold text-slate-800 dark:text-slate-100">{value}</Text>
+                <Text className="text-xs font-medium text-slate-500 dark:text-slate-400">{label}</Text>
                 <Text className={`text-[10px] font-bold ${color}`}>{subValue}</Text>
             </CardContent>
         </Card>
@@ -86,7 +86,10 @@ export default function DashboardScreen({ navigation }: any) {
                         </TouchableOpacity>
 
                         {/* Profile Avatar */}
-                        <View className="h-10 w-10 rounded-full bg-white/20 items-center justify-center border border-white/30 overflow-hidden">
+                        <TouchableOpacity
+                            onPress={() => navigation.navigate("Settings")}
+                            className="h-10 w-10 rounded-full bg-white/20 items-center justify-center border border-white/30 overflow-hidden"
+                        >
                             {user?.profile_image ? (
                                 <Image source={{ uri: user.profile_image }} className="h-full w-full" resizeMode="cover" />
                             ) : (
@@ -94,7 +97,7 @@ export default function DashboardScreen({ navigation }: any) {
                                     {user?.name ? user.name.substring(0, 2).toUpperCase() : "SM"}
                                 </Text>
                             )}
-                        </View>
+                        </TouchableOpacity>
                     </View>
                 </View>
 
@@ -167,73 +170,73 @@ export default function DashboardScreen({ navigation }: any) {
                 {/* Action Buttons */}
                 <View className="p-4 mt-4 space-y-3">
                     <TouchableOpacity
-                        className="bg-white p-4 rounded-xl flex-row items-center justify-between shadow-sm active:bg-slate-50"
+                        className="bg-white dark:bg-slate-800 p-4 rounded-xl flex-row items-center justify-between shadow-sm active:bg-slate-50 dark:active:bg-slate-700"
                         onPress={() => navigation.navigate("DataEntry")}
                     >
                         <View className="flex-row items-center space-x-3">
-                            <View className="bg-teal-100 p-2 rounded-full">
+                            <View className="bg-teal-100 dark:bg-teal-900/50 p-2 rounded-full">
                                 <Activity size={20} color="#0d9488" />
                             </View>
                             <View>
-                                <Text className="font-bold text-slate-800">Log Daily Vitals</Text>
-                                <Text className="text-slate-500 text-xs">Record your metrics</Text>
+                                <Text className="font-bold text-slate-800 dark:text-slate-100">Log Daily Vitals</Text>
+                                <Text className="text-slate-500 dark:text-slate-400 text-xs">Record your metrics</Text>
                             </View>
                         </View>
-                        <View className="h-8 w-8 rounded-full bg-slate-100 items-center justify-center">
+                        <View className="h-8 w-8 rounded-full bg-slate-100 dark:bg-slate-700 items-center justify-center">
                             <Text className="text-slate-400">arrow</Text>
                         </View>
                     </TouchableOpacity>
 
                     <TouchableOpacity
-                        className="bg-white p-4 rounded-xl flex-row items-center justify-between shadow-sm active:bg-slate-50"
+                        className="bg-white dark:bg-slate-800 p-4 rounded-xl flex-row items-center justify-between shadow-sm active:bg-slate-50 active:dark:bg-slate-700"
                         onPress={() => navigation.navigate("WhatIf")}
                     >
                         <View className="flex-row items-center space-x-3">
-                            <View className="bg-indigo-100 p-2 rounded-full">
+                            <View className="bg-indigo-100 dark:bg-indigo-900/50 p-2 rounded-full">
                                 <Wind size={20} color="#4f46e5" />
                             </View>
                             <View>
-                                <Text className="font-bold text-slate-800">What-If Scenarios</Text>
-                                <Text className="text-slate-500 text-xs">AI Predictions</Text>
+                                <Text className="font-bold text-slate-800 dark:text-slate-100">What-If Scenarios</Text>
+                                <Text className="text-slate-500 dark:text-slate-400 text-xs">AI Predictions</Text>
                             </View>
                         </View>
-                        <View className="h-8 w-8 rounded-full bg-slate-100 items-center justify-center">
+                        <View className="h-8 w-8 rounded-full bg-slate-100 dark:bg-slate-700 items-center justify-center">
                             <Text className="text-slate-400">arrow</Text>
                         </View>
                     </TouchableOpacity>
 
                     <TouchableOpacity
-                        className="bg-white p-4 rounded-xl flex-row items-center justify-between shadow-sm active:bg-slate-50"
+                        className="bg-white dark:bg-slate-800 p-4 rounded-xl flex-row items-center justify-between shadow-sm active:bg-slate-50 active:dark:bg-slate-700"
                         onPress={() => navigation.navigate("Achievements")} // Navigate to achievements
                     >
                         <View className="flex-row items-center space-x-3">
-                            <View className="bg-amber-100 p-2 rounded-full">
+                            <View className="bg-amber-100 dark:bg-amber-900/50 p-2 rounded-full">
                                 <Trophy size={20} color="#d97706" />
                             </View>
                             <View>
-                                <Text className="font-bold text-slate-800">Achievements</Text>
-                                <Text className="text-slate-500 text-xs">View your badges</Text>
+                                <Text className="font-bold text-slate-800 dark:text-slate-100">Achievements</Text>
+                                <Text className="text-slate-500 dark:text-slate-400 text-xs">View your badges</Text>
                             </View>
                         </View>
-                        <View className="h-8 w-8 rounded-full bg-slate-100 items-center justify-center">
+                        <View className="h-8 w-8 rounded-full bg-slate-100 dark:bg-slate-700 items-center justify-center">
                             <Text className="text-slate-400">arrow</Text>
                         </View>
                     </TouchableOpacity>
 
                     <TouchableOpacity
-                        className="bg-white p-4 rounded-xl flex-row items-center justify-between shadow-sm active:bg-slate-50"
+                        className="bg-white dark:bg-slate-800 p-4 rounded-xl flex-row items-center justify-between shadow-sm active:bg-slate-50 active:dark:bg-slate-700"
                         onPress={() => navigation.navigate("WeeklySummary")}
                     >
                         <View className="flex-row items-center space-x-3">
-                            <View className="bg-emerald-100 p-2 rounded-full">
+                            <View className="bg-emerald-100 dark:bg-emerald-900/50 p-2 rounded-full">
                                 <Activity size={20} color="#10b981" />
                             </View>
                             <View>
-                                <Text className="font-bold text-slate-800">Weekly Summary</Text>
-                                <Text className="text-slate-500 text-xs">Your Twin's Report</Text>
+                                <Text className="font-bold text-slate-800 dark:text-slate-100">Weekly Summary</Text>
+                                <Text className="text-slate-500 dark:text-slate-400 text-xs">Your Twin's Report</Text>
                             </View>
                         </View>
-                        <View className="h-8 w-8 rounded-full bg-slate-100 items-center justify-center">
+                        <View className="h-8 w-8 rounded-full bg-slate-100 dark:bg-slate-700 items-center justify-center">
                             <Text className="text-slate-400">arrow</Text>
                         </View>
                     </TouchableOpacity>

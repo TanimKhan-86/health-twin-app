@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { View, Text, TouchableOpacity, ScrollView, Image, Alert } from "react-native";
+import { View, Text, TouchableOpacity, ScrollView, Image, Alert, Platform } from "react-native";
 import { ScreenLayout } from "../../components/ScreenLayout";
 import { Input } from "../../components/ui/Input";
 import { Button } from "../../components/ui/Button";
@@ -80,12 +80,22 @@ export default function SignUpScreen({ navigation }: any) {
             // Persist session
             await AsyncStorage.setItem('USER_ID', userId);
 
-            Alert.alert("Success", "Account created successfully!", [
-                { text: "OK", onPress: () => navigation.replace("Main") }
-            ]);
+            if (Platform.OS === 'web') {
+                alert("Account created successfully!");
+                navigation.replace("Main");
+            } else {
+                Alert.alert("Success", "Account created successfully!", [
+                    { text: "OK", onPress: () => navigation.replace("Main") }
+                ]);
+            }
         } catch (error) {
             console.error(error);
-            Alert.alert("Error", "Failed to create account. Email might be in use.");
+            const msg = "Failed to create account. Email might be in use.";
+            if (Platform.OS === 'web') {
+                alert(msg);
+            } else {
+                Alert.alert("Error", msg);
+            }
         } finally {
             setIsLoading(false);
         }
