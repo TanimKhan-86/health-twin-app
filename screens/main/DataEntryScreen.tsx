@@ -200,7 +200,7 @@ export default function DataEntryScreen({ navigation }: any) {
                         </View>
                     </View>
 
-                    <ScrollView className="flex-1" showsVerticalScrollIndicator={false}>
+                    <ScrollView className="flex-1" showsVerticalScrollIndicator={false} keyboardDismissMode="on-drag" keyboardShouldPersistTaps="handled">
                         {renderSectionContent()}
                     </ScrollView>
 

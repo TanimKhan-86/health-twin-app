@@ -142,7 +142,7 @@ export default function SignUpScreen({ navigation }: any) {
             </View>
 
             {/* Form Content */}
-            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 40 }}>
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 40 }} keyboardDismissMode="on-drag" keyboardShouldPersistTaps="handled">
                 {step === 1 && (
                     <View className="space-y-4">
                         <View className="flex-row space-x-4">
