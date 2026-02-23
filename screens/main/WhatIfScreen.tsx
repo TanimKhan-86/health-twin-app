@@ -1,13 +1,14 @@
 import { useState, useEffect, useMemo } from "react";
-import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator } from "react-native";
+import { View, Text, ScrollView, TouchableOpacity, Dimensions } from "react-native";
 import Slider from "@react-native-community/slider";
+import { LineChart } from "react-native-gifted-charts";
 import { ScreenLayout } from "../../components/ScreenLayout";
 import { Card, CardContent } from "../../components/ui/Card";
-import { ArrowLeft, Activity, Moon, Zap, RefreshCw } from "lucide-react-native";
+import { ArrowLeft, Activity, Moon, Zap, RefreshCw, TrendingUp } from "lucide-react-native";
 import { DigitalTwinAvatar } from "../../components/DigitalTwinAvatar";
-import { calculatePredictedEnergy, predictMoodState, generatePredictionInsight } from "../../lib/prediction/model";
-import { WeeklyAnalytics, generateWeeklyAnalytics } from "../../lib/analytics";
-import { DemoDataHelper, getToday, getDaysAgo } from "../../lib/demoData"; // Using demo data for now as placeholder for real service
+import { calculatePredictedEnergy, predictMoodState, generatePredictionInsight, generateHabitSimulation } from "../../lib/prediction/model";
+
+const screenWidth = Dimensions.get("window").width;
 
 export default function WhatIfScreen({ navigation }: any) {
     const [loading, setLoading] = useState(true);
@@ -21,11 +22,27 @@ export default function WhatIfScreen({ navigation }: any) {
     const [simSteps, setSimSteps] = useState(5000);
     const [simSleep, setSimSleep] = useState(6.5);
 
-    // Computed Prediction
+    // Computed Prediction for "Today"
     const predictedEnergy = useMemo(() => calculatePredictedEnergy(simSleep, simSteps), [simSleep, simSteps]);
     const predictedMood = useMemo(() => predictMoodState(simSleep, predictedEnergy), [simSleep, predictedEnergy]);
 
+    // Computed 30-Day Forecast
+    const forecastData = useMemo(() =>
+        generateHabitSimulation(baselineSleep, baselinesteps, simSleep, simSteps, 30),
+        [baselineSleep, baselinesteps, simSleep, simSteps]);
+
+    // Format data for Gifted Charts
+    const chartData = useMemo(() => {
+        return forecastData.map((point) => ({
+            value: point.predictedEnergy,
+            label: point.day % 5 === 0 ? `D${point.day}` : '', // Show label every 5 days
+            dataPointText: point.day === 30 ? point.predictedEnergy.toString() : '',
+        }));
+    }, [forecastData]);
+
     const energyDiff = predictedEnergy - baselineEnergy;
+    const finalEnergyDiff = forecastData[forecastData.length - 1].predictedEnergy - baselineEnergy;
+
     const narrative = useMemo(() => generatePredictionInsight(
         baselineEnergy,
         predictedEnergy,
@@ -40,12 +57,6 @@ export default function WhatIfScreen({ navigation }: any) {
 
     const loadData = async () => {
         try {
-            // In a real app, get current user ID. For now using demo/test logic or generic
-            // We can fetch analytics for "last 7 days" to get averages
-            // Since we might not have a user ID context here, we'll sim a fetch or use defaults if empty
-            // For visual impact, let's use the Demo Data's "7 days ago" stats if available, 
-            // or just sensible defaults.
-
             // Simulating fetch delay
             setTimeout(() => {
                 setBaselineSteps(6500);
@@ -67,8 +78,6 @@ export default function WhatIfScreen({ navigation }: any) {
         setSimSteps(baselinesteps);
         setSimSleep(baselineSleep);
     };
-
-
 
     return (
         <ScreenLayout gradientBackground>
@@ -102,7 +111,7 @@ export default function WhatIfScreen({ navigation }: any) {
                     </Card>
 
                     {/* Controls */}
-                    <Card className="bg-white/95 backdrop-blur-sm">
+                    <Card className="bg-white/95 backdrop-blur-sm mb-6">
                         <CardContent className="p-6 space-y-6">
                             <View className="flex-row justify-between items-center pb-2 border-b border-gray-100">
                                 <Text className="text-slate-500 font-medium">Adjust Habits</Text>
@@ -161,28 +170,51 @@ export default function WhatIfScreen({ navigation }: any) {
                                     thumbTintColor="#6366f1"
                                 />
                             </View>
+                        </CardContent>
+                    </Card>
 
-                            {/* Result: Predicted Energy */}
-                            <View className="pt-4 border-t border-gray-100">
-                                <View className="flex-row justify-between items-center mb-2">
-                                    <View className="flex-row items-center space-x-2">
-                                        <Zap size={20} color="#f59e0b" />
-                                        <Text className="font-bold text-slate-800 text-lg">Predicted Energy</Text>
-                                    </View>
-                                    <View className="flex-row items-end space-x-2">
-                                        <Text className="text-3xl font-bold text-amber-500">{predictedEnergy}</Text>
-                                        <Text className={`text-sm mb-1 font-medium ${energyDiff >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                                            ({energyDiff >= 0 ? '+' : ''}{energyDiff})
-                                        </Text>
-                                    </View>
+                    {/* 30-Day Forecast Chart */}
+                    <Card className="bg-white/95 backdrop-blur-sm mb-10 overflow-hidden">
+                        <CardContent className="p-6">
+                            <View className="flex-row justify-between items-center mb-6">
+                                <View className="flex-row items-center space-x-2">
+                                    <TrendingUp size={20} color="#8b5cf6" />
+                                    <Text className="font-bold text-slate-800 text-lg">30-Day Energy Forecast</Text>
                                 </View>
-                                {/* Progress Bar / Visual Indicator */}
-                                <View className="h-3 bg-gray-200 rounded-full overflow-hidden w-full">
-                                    <View
-                                        className="h-full bg-amber-500 rounded-full"
-                                        style={{ width: `${Math.min(predictedEnergy, 100)}%` }}
-                                    />
+                                <View className="items-end">
+                                    <Text className={`text-sm font-bold ${finalEnergyDiff >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                                        {finalEnergyDiff >= 0 ? '+' : ''}{finalEnergyDiff} pts
+                                    </Text>
+                                    <Text className="text-xs text-slate-400">by Day 30</Text>
                                 </View>
+                            </View>
+
+                            <View className="mt-2 -ml-2">
+                                <LineChart
+                                    data={chartData}
+                                    height={180}
+                                    width={screenWidth - 100}
+                                    spacing={(screenWidth - 100) / 30}
+                                    thickness={3}
+                                    color="#8b5cf6"
+                                    hideDataPoints={true}
+                                    hideRules={false}
+                                    rulesType="solid"
+                                    rulesColor="#f1f5f9"
+                                    yAxisColor="#cbd5e1"
+                                    xAxisColor="#cbd5e1"
+                                    yAxisTextStyle={{ color: '#94a3b8', fontSize: 10 }}
+                                    xAxisLabelTextStyle={{ color: '#94a3b8', fontSize: 10, textAlign: 'center' }}
+                                    maxValue={100}
+                                    noOfSections={5}
+                                    areaChart
+                                    startFillColor="#c4b5fd"
+                                    endFillColor="#f8fafc"
+                                    startOpacity={0.4}
+                                    endOpacity={0.1}
+                                    animationDuration={1000}
+                                    isAnimated
+                                />
                             </View>
                         </CardContent>
                     </Card>
