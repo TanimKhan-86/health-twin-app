@@ -4,20 +4,20 @@ import { ScreenLayout } from '../../components/ScreenLayout';
 import { Card, CardContent } from '../../components/ui/Card';
 import { ArrowLeft, Lock, Trophy } from 'lucide-react-native';
 import { GamificationService } from '../../lib/gamification';
-import { UserService } from '../../lib/services'; // Assuming we have a way to get ID, or use demo
+import { useAuth } from '../../contexts/AuthContext';
 
 export default function AchievementsScreen({ navigation }: any) {
+    const { user } = useAuth();
     const [badges, setBadges] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
         loadBadges();
-    }, []);
+    }, [user]);
 
     const loadBadges = async () => {
         try {
-            // Demo User ID for now, consistent with other screens
-            const userId = 'demo-user-123';
+            const userId = user?.id ?? 'demo-user';
             // Force check achievements first to ensure latest state
             await GamificationService.checkAchievements(userId);
             const data = await GamificationService.getBadgeProgress(userId);

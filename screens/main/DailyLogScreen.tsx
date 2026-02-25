@@ -1,15 +1,13 @@
-import React, { useState, useEffect } from "react";
-import { View, Text, ScrollView, TouchableOpacity, Alert, ActivityIndicator } from "react-native";
+import React, { useState } from "react";
+import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator } from "react-native";
 import Slider from "@react-native-community/slider";
 import { ScreenLayout } from "../../components/ScreenLayout";
 import { Button } from "../../components/ui/Button";
 import { Input } from "../../components/ui/Input";
-import { Activity, Moon, Smile, ArrowLeft, Save, Calendar, RefreshCw, Download, User } from "lucide-react-native";
+import { Activity, Moon, Smile, ArrowLeft, Save, Calendar, User } from "lucide-react-native";
 import { useToast } from "../../components/ui/Toast";
-import { DemoDataHelper } from "../../lib/demoData";
-import { HealthService, MoodService, UserService } from "../../lib/services";
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import db from '../../lib/database';
+import { logHealth, logMood } from "../../lib/api/auth";
+import { useAuth } from "../../contexts/AuthContext";
 
 // Tabs
 const sections = [
@@ -20,9 +18,9 @@ const sections = [
 
 export default function DailyLogScreen({ navigation }: any) {
     const { showToast } = useToast();
+    const { user } = useAuth(); // ✅ user from MongoDB via AuthContext
     const [currentSection, setCurrentSection] = useState(0);
     const [loading, setLoading] = useState(false);
-    const [userId, setUserId] = useState<string | null>(null);
 
     // Form State
     const [steps, setSteps] = useState("8500");
@@ -31,14 +29,6 @@ export default function DailyLogScreen({ navigation }: any) {
     const [mood, setMood] = useState("good");
     const [energy, setEnergy] = useState(7);
 
-    useEffect(() => {
-        loadUser();
-    }, []);
-
-    const loadUser = async () => {
-        const id = await AsyncStorage.getItem('USER_ID');
-        if (id) setUserId(id);
-    };
 
     const handleNext = () => {
         if (currentSection < sections.length - 1) {
@@ -49,81 +39,45 @@ export default function DailyLogScreen({ navigation }: any) {
     };
 
     const handleSave = async () => {
-        if (!userId) return;
+        if (!user) {
+            showToast('Please log in first', 'error');
+            return;
+        }
         setLoading(true);
         try {
             const today = new Date().toISOString().split('T')[0];
 
-            // Save Health
-            const calculatedEnergy = (sleepHours / 8) * 0.6 + (parseInt(steps) / 10000) * 0.4;
-            await HealthService.upsertHealthEntry({
-                user_id: userId,
+            // Save Health to MongoDB Atlas ☁️
+            const energyScore = Math.min(100, Math.max(0,
+                ((sleepHours / 8) * 0.6 + (parseInt(steps) / 10000) * 0.4) * 100
+            ));
+
+            await logHealth({
                 date: today,
                 steps: parseInt(steps) || 0,
-                sleep_hours: sleepHours,
-                energy_score: Math.min(100, Math.max(0, calculatedEnergy * 100))
+                sleepHours,
+                energyScore,
             });
 
-            // Save Mood
-            await MoodService.addMoodEntry({
-                user_id: userId,
+            // Save Mood to MongoDB Atlas ☁️
+            await logMood({
                 date: today,
-                mood_value: mood as any,
-                emotion_score: energy * 10, // Approximate
-                diary_text: "Daily log entry"
+                mood,
+                energyLevel: energy,
+                notes: 'Daily log entry',
             });
 
-            showToast("Entry saved successfully!", "success");
-
-            // Navigate to Main (replace to prevent going back)
-            navigation.replace("Main");
-
+            showToast('✅ Saved to MongoDB Atlas!', 'success');
+            navigation.replace('Main');
         } catch (error) {
             console.error(error);
-            showToast("Failed to save entry", "error");
+            showToast('Failed to save entry', 'error');
         } finally {
             setLoading(false);
         }
     };
 
-    const handleLoadExample = async () => {
-        setLoading(true);
-        try {
-            // Check if user exists, if not create one
-            let uid = userId;
-            if (!uid) {
-                uid = await DemoDataHelper.createDemoUser();
-                await AsyncStorage.setItem('USER_ID', uid);
-                setUserId(uid);
-            }
-
-            // Populate data
-            if (uid) {
-                await DemoDataHelper.addSampleHealthData(uid);
-                await DemoDataHelper.addSampleMoodData(uid);
-                showToast("Example week loaded!", "success");
-                navigation.replace("Main"); // Go to dashboard with data
-            }
-        } catch (e) {
-            showToast("Error loading data", "error");
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const handleReset = async () => {
-        setLoading(true);
-        try {
-            const database = db.getDB();
-            await database.runAsync('DELETE FROM health_entries');
-            await database.runAsync('DELETE FROM moods');
-            showToast("Demo data reset.", "info");
-        } catch (e) {
-            showToast("Error resetting data", "error");
-        } finally {
-            setLoading(false);
-        }
-    };
+    // Removed: handleLoadExample and handleReset (no more local DB)
 
     const renderSectionContent = () => {
         switch (currentSection) {
@@ -272,33 +226,15 @@ export default function DailyLogScreen({ navigation }: any) {
                 {/* Main Content Card */}
                 <View className="flex-1 bg-slate-50 rounded-t-[40px] px-6 pt-8 pb-6 shadow-2xl">
 
-                    {/* Data Input Method Box */}
+                    {/* Section Info */}
                     <View className="bg-purple-50 p-4 rounded-2xl border border-purple-100 flex-row items-center space-x-4 mb-6">
                         <View className="w-12 h-12 bg-purple-100 rounded-full items-center justify-center">
                             <User size={24} color="#a855f7" />
                         </View>
                         <View>
-                            <Text className="text-slate-900 font-bold text-base">Data Input Method</Text>
-                            <Text className="text-slate-500 text-sm">Manual demo entry.</Text>
+                            <Text className="text-slate-900 font-bold text-base">Daily Health Log</Text>
+                            <Text className="text-slate-500 text-sm">Saved to MongoDB Atlas ☁️</Text>
                         </View>
-                    </View>
-
-                    {/* Action Buttons */}
-                    <View className="flex-row space-x-4 mb-8">
-                        <TouchableOpacity
-                            onPress={handleLoadExample}
-                            className="flex-1 flex-row items-center justify-center space-x-2 bg-white border border-slate-200 py-3 rounded-xl shadow-sm"
-                        >
-                            <Download size={18} color="#64748b" />
-                            <Text className="text-slate-600 font-medium text-xs">Load Example Week</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                            onPress={handleReset}
-                            className="flex-1 flex-row items-center justify-center space-x-2 bg-white border border-slate-200 py-3 rounded-xl shadow-sm"
-                        >
-                            <RefreshCw size={18} color="#64748b" />
-                            <Text className="text-slate-600 font-medium text-xs">Reset Demo Data</Text>
-                        </TouchableOpacity>
                     </View>
 
                     {/* Tabs / Section Indicators */}

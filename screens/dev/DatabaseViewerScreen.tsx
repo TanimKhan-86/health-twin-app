@@ -1,104 +1,57 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, FlatList } from 'react-native';
+import React from 'react';
+import { View, Text, TouchableOpacity, ScrollView } from 'react-native';
 import { ScreenLayout } from '../../components/ScreenLayout';
-import { ChevronLeft, RefreshCw, Database } from 'lucide-react-native';
-import db from '../../lib/database';
+import { ArrowLeft, Database } from 'lucide-react-native';
+import { Card, CardContent } from '../../components/ui/Card';
 
+/**
+ * DatabaseViewerScreen — previously showed SQLite data.
+ * SQLite has been removed. All data is now in MongoDB Atlas.
+ * This screen now shows a notice and could be extended to show
+ * the user's MongoDB data via the API.
+ */
 export default function DatabaseViewerScreen({ navigation }: any) {
-    const [activeTable, setActiveTable] = useState('users');
-    const [data, setData] = useState<any[]>([]);
-    const [columns, setColumns] = useState<string[]>([]);
-
-    const tables = ['users', 'health_entries', 'moods', 'streaks', 'achievements'];
-
-    useEffect(() => {
-        fetchData(activeTable);
-    }, [activeTable]);
-
-    const fetchData = async (table: string) => {
-        try {
-            const database = db.getDB();
-            const result = await database.getAllAsync(`SELECT * FROM ${table} ORDER BY rowid DESC LIMIT 50`);
-            setData(result);
-            if (result.length > 0) {
-                setColumns(Object.keys(result[0] as object));
-            } else {
-                setColumns([]);
-            }
-        } catch (e) {
-            console.error(e);
-            setData([]);
-        }
-    };
-
-    const renderHeader = () => (
-        <View className="flex-row bg-slate-800 p-2 border-b border-slate-700">
-            {columns.map((col) => (
-                <Text key={col} className="text-teal-400 font-bold w-32 mr-2 text-xs" numberOfLines={1}>
-                    {col}
-                </Text>
-            ))}
-        </View>
-    );
-
-    const renderItem = ({ item }: { item: any }) => (
-        <View className="flex-row p-2 border-b border-slate-800/50">
-            {columns.map((col) => (
-                <Text key={col} className="text-slate-300 w-32 mr-2 text-xs" numberOfLines={1}>
-                    {typeof item[col] === 'object' ? JSON.stringify(item[col]) : String(item[col])}
-                </Text>
-            ))}
-        </View>
-    );
-
     return (
         <ScreenLayout gradientBackground>
-            {/* Header */}
-            <View className="p-4 pt-2 flex-row items-center justify-between">
-                <View className="flex-row items-center space-x-4">
-                    <TouchableOpacity onPress={() => navigation.goBack()} className="w-10 h-10 rounded-full bg-white/20 items-center justify-center">
-                        <ChevronLeft color="white" size={24} />
+            <View className="flex-1">
+                <View className="p-4 pt-2 flex-row items-center space-x-4">
+                    <TouchableOpacity
+                        onPress={() => navigation.goBack()}
+                        className="flex-row items-center bg-white/20 px-3 py-2 rounded-full"
+                    >
+                        <ArrowLeft color="white" size={20} />
+                        <Text className="text-white font-bold ml-2">Back</Text>
                     </TouchableOpacity>
-                    <Text className="text-white text-xl font-bold">DB Viewer</Text>
-                </View>
-                <TouchableOpacity onPress={() => fetchData(activeTable)} className="p-2 bg-white/10 rounded-lg">
-                    <RefreshCw color="white" size={20} />
-                </TouchableOpacity>
-            </View>
-
-            {/* Table Selector */}
-            <View className="px-4 mb-4">
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} className="flex-row space-x-2">
-                    {tables.map((table) => (
-                        <TouchableOpacity
-                            key={table}
-                            onPress={() => setActiveTable(table)}
-                            className={`px-4 py-2 rounded-full ${activeTable === table ? 'bg-teal-500' : 'bg-slate-700'}`}
-                        >
-                            <Text className="text-white font-medium capitalize">{table.replace('_', ' ')}</Text>
-                        </TouchableOpacity>
-                    ))}
-                </ScrollView>
-            </View>
-
-            {/* Data Table */}
-            <View className="flex-1 bg-slate-900/80 mx-4 mb-8 rounded-xl overflow-hidden border border-slate-700">
-                <ScrollView horizontal>
                     <View>
-                        {renderHeader()}
-                        <FlatList
-                            data={data}
-                            keyExtractor={(_, index) => index.toString()}
-                            renderItem={renderItem}
-                            scrollEnabled={false} // Use parent scroll
-                        />
-                        {data.length === 0 && (
-                            <View className="p-8 items-center">
-                                <Database color="#64748b" size={48} />
-                                <Text className="text-slate-500 mt-4">No records found</Text>
-                            </View>
-                        )}
+                        <Text className="text-white text-xl font-bold">Database</Text>
+                        <Text className="text-teal-200 text-xs">Storage info</Text>
                     </View>
+                </View>
+
+                <ScrollView contentContainerStyle={{ padding: 16 }}>
+                    <Card className="bg-white/95">
+                        <CardContent className="p-8 items-center">
+                            <Database size={48} color="#a855f7" />
+                            <Text className="text-slate-800 font-bold text-xl mt-4 text-center">
+                                MongoDB Atlas ☁️
+                            </Text>
+                            <Text className="text-slate-500 text-sm text-center mt-3 leading-6">
+                                All your data is stored securely in MongoDB Atlas.
+                                There is no local database on this device.
+                            </Text>
+                            <View className="bg-purple-50 rounded-xl p-4 mt-6 w-full">
+                                <Text className="text-purple-800 font-bold mb-2">Collections:</Text>
+                                {['users', 'healthentries', 'moodentries', 'streaks'].map(col => (
+                                    <Text key={col} className="text-purple-600 text-sm py-1">
+                                        📦 {col}
+                                    </Text>
+                                ))}
+                            </View>
+                            <Text className="text-slate-400 text-xs mt-4 text-center">
+                                Use the Analytics screen to view your stored health data.
+                            </Text>
+                        </CardContent>
+                    </Card>
                 </ScrollView>
             </View>
         </ScreenLayout>

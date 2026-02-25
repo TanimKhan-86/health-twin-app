@@ -4,10 +4,10 @@ import { ScreenLayout } from "../../components/ScreenLayout";
 import { Input } from "../../components/ui/Input";
 import { Button } from "../../components/ui/Button";
 import { CircuitBoard } from "lucide-react-native";
-import { UserService } from "../../lib/services";
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useAuth } from "../../contexts/AuthContext";
 
 export default function SignInScreen({ navigation }: any) {
+    const { login } = useAuth();
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
     const [isLoading, setIsLoading] = useState(false);
@@ -20,17 +20,19 @@ export default function SignInScreen({ navigation }: any) {
 
         setIsLoading(true);
         try {
-            const user = await UserService.authenticateUser(email, password);
-
-            if (user && user.user_id) {
-                await AsyncStorage.setItem('USER_ID', user.user_id);
-                navigation.replace("Main");
-            } else {
-                Alert.alert("Invalid Credentials", "Please check your email and password.");
+            // Call AuthContext → backend → MongoDB
+            const user = await login(email, password);
+            if (!user) {
+                const msg = "Invalid email or password.";
+                if (Platform.OS === 'web') alert(msg);
+                else Alert.alert("Invalid Credentials", msg);
             }
+            // Auth gate in App.tsx auto-navigates to Main — no navigation.replace needed!
         } catch (error) {
             console.error(error);
-            Alert.alert("Error", "Something went wrong. Please try again.");
+            const msg = "Something went wrong. Please try again.";
+            if (Platform.OS === 'web') alert(msg);
+            else Alert.alert("Error", msg);
         } finally {
             setIsLoading(false);
         }

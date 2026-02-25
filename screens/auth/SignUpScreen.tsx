@@ -5,10 +5,10 @@ import { Input } from "../../components/ui/Input";
 import { Button } from "../../components/ui/Button";
 import { Heart, ArrowLeft, Check, Camera, Upload } from "lucide-react-native";
 import * as ImagePicker from 'expo-image-picker';
-import { UserService } from "../../lib/services";
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useAuth } from "../../contexts/AuthContext";
 
 export default function SignUpScreen({ navigation }: any) {
+    const { register } = useAuth();
     const [step, setStep] = useState(1);
     const [isLoading, setIsLoading] = useState(false);
     const [formData, setFormData] = useState({
@@ -29,6 +29,10 @@ export default function SignUpScreen({ navigation }: any) {
                 Alert.alert("Missing Fields", "Please fill in all required fields.");
                 return;
             }
+            if (formData.password.length < 8) {
+                Alert.alert("Password Too Short", "Password must be at least 8 characters long.");
+                return;
+            }
             if (formData.password !== formData.confirmPassword) {
                 Alert.alert("Password Mismatch", "Passwords do not match.");
                 return;
@@ -39,6 +43,7 @@ export default function SignUpScreen({ navigation }: any) {
         else handleSignup();
     };
 
+
     const handleBack = () => {
         if (step > 1) setStep(step - 1);
         else navigation.goBack();
@@ -46,60 +51,59 @@ export default function SignUpScreen({ navigation }: any) {
 
     const pickImage = async () => {
         const result = await ImagePicker.launchImageLibraryAsync({
-            mediaTypes: ImagePicker.MediaTypeOptions.Images,
+            mediaTypes: ['images'],  // ← new API (MediaTypeOptions deprecated)
             allowsEditing: true,
             aspect: [1, 1],
-            quality: 0.5,
+            quality: 0.3,
+            base64: true,
         });
 
-        if (!result.canceled) {
-            setFormData({ ...formData, profileImage: result.assets[0].uri });
+        if (!result.canceled && result.assets[0]) {
+            const asset = result.assets[0];
+            // Convert to a base64 data URI (storable in MongoDB)
+            const dataUri = asset.base64
+                ? `data:image/jpeg;base64,${asset.base64}`
+                : asset.uri; // fallback on platforms that don't return base64
+            setFormData({ ...formData, profileImage: dataUri });
         }
     };
+
 
     const handleSignup = async () => {
         setIsLoading(true);
         try {
-            const userId = `user_${Date.now()}`; // Simple ID generation
+            const fullName = `${formData.firstName} ${formData.lastName}`.trim();
 
-            await UserService.upsertUser({
-                user_id: userId,
-                name: `${formData.firstName} ${formData.lastName}`,
-                email: formData.email,
-                password: formData.password,
-                profile_image: formData.profileImage || undefined,
-                study_mode: 'both',
-                consent_given: true, // Implicit for demo
-                settings_json: JSON.stringify({
-                    age: formData.age,
-                    height: formData.height,
-                    weight: formData.weight
-                })
-            });
+            // Build optional profile fields
+            const profile = {
+                age: formData.age ? parseInt(formData.age) : undefined,
+                heightCm: formData.height ? parseFloat(formData.height) : undefined,
+                weightKg: formData.weight ? parseFloat(formData.weight) : undefined,
+                profileImage: formData.profileImage ?? undefined,
+            };
 
-            // Persist session
-            await AsyncStorage.setItem('USER_ID', userId);
+            // Call AuthContext → backend → MongoDB (saves ALL fields)
+            const user = await register(fullName, formData.email, formData.password, profile);
 
-            if (Platform.OS === 'web') {
-                alert("Account created successfully!");
-                navigation.replace("Main");
-            } else {
-                Alert.alert("Success", "Account created successfully!", [
-                    { text: "OK", onPress: () => navigation.replace("Main") }
-                ]);
+            if (!user) {
+                const msg = "Failed to create account. Email might already be in use.";
+                if (Platform.OS === 'web') alert(msg);
+                else Alert.alert("Error", msg);
+                return;
             }
+
+            console.log(`✅ Registered in MongoDB: ${user.id} with full profile`);
+            // Auth gate in App.tsx auto-navigates to Main
         } catch (error) {
             console.error(error);
-            const msg = "Failed to create account. Email might be in use.";
-            if (Platform.OS === 'web') {
-                alert(msg);
-            } else {
-                Alert.alert("Error", msg);
-            }
+            const msg = "Something went wrong. Please try again.";
+            if (Platform.OS === 'web') alert(msg);
+            else Alert.alert("Error", msg);
         } finally {
             setIsLoading(false);
         }
     };
+
 
     // Helper to render the circular steps
     const renderStep = (num: number) => {
