@@ -1,14 +1,14 @@
-import React, { useState, useEffect } from "react";
-import { View, Text, TouchableOpacity, ScrollView, Alert, Switch, Share, Platform } from "react-native";
+import React, { useState } from "react";
+import { View, Text, TouchableOpacity, ScrollView, Alert, Switch, Share, Platform, Image } from "react-native";
 import { ScreenLayout } from "../../components/ScreenLayout";
 import { Button } from "../../components/ui/Button";
 import { useToast } from "../../components/ui/Toast";
+import { useColorScheme } from "nativewind";
 import {
-    User, Settings, Bell, Moon, Download, Trash2, LogOut, ChevronRight, Shield, Database
+    User, Bell, Moon, Download, Trash2, LogOut, ChevronRight, Shield, Database
 } from "lucide-react-native";
-import { UserService, HealthService, MoodService, AchievementService } from "../../lib/services";
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { CommonActions } from "@react-navigation/native";
+import { useAuth } from "../../contexts/AuthContext";
+import { seedDemoWeek } from "../../lib/api/auth";
 
 interface SettingItemProps {
     icon: React.ReactNode;
@@ -24,7 +24,7 @@ function SettingItem({ icon, label, onPress, value, isDestructive, isSwitch, onS
     return (
         <TouchableOpacity
             onPress={isSwitch ? undefined : onPress}
-            className="flex-row items-center justify-between p-4 bg-white/80 border-b border-slate-100 first:rounded-t-2xl last:rounded-b-2xl last:border-0"
+            className="flex-row items-center justify-between p-4 bg-white/80 border-b border-slate-100"
             disabled={isSwitch}
         >
             <View className="flex-row items-center space-x-3">
@@ -46,7 +46,7 @@ function SettingItem({ icon, label, onPress, value, isDestructive, isSwitch, onS
                     />
                 ) : (
                     <View className="flex-row items-center space-x-2">
-                        {value && <Text className="text-slate-400 text-sm">{value}</Text>}
+                        {value && <Text className="text-slate-400 text-sm">{value as string}</Text>}
                         {!isDestructive && <ChevronRight size={20} color="#cbd5e1" />}
                     </View>
                 )}
@@ -55,160 +55,101 @@ function SettingItem({ icon, label, onPress, value, isDestructive, isSwitch, onS
     );
 }
 
-import { useColorScheme } from "nativewind";
-
-// ...
-
 export default function SettingsScreen({ navigation }: any) {
-    const [user, setUser] = useState<any>(null);
-    const [isLoading, setIsLoading] = useState(false);
+    const { user: authUser, logout } = useAuth();
     const { showToast } = useToast();
-
-    // NativeWind Hook
-    const { colorScheme, setColorScheme, toggleColorScheme } = useColorScheme();
-
-    // Preferences (Demo)
+    const { colorScheme, toggleColorScheme } = useColorScheme();
+    const [isLoading, setIsLoading] = useState(false);
+    const [isSeeding, setIsSeeding] = useState(false);
     const [notifications, setNotifications] = useState(true);
-    // const [darkMode, setDarkMode] = useState(false); // Removed manual state
 
-    useEffect(() => {
-        loadUser();
-    }, []);
+    // ─── Handlers ─────────────────────────────────────────────────────────────────
+    const handleLogout = async () => {
+        const doLogout = async () => {
+            await logout(); // Clears JWT + state; RootNavigator auto-routes to SignIn
+        };
 
-    const loadUser = async () => {
-        const userId = await AsyncStorage.getItem('USER_ID');
-        if (userId) {
-            const u = await UserService.getUser(userId);
-            setUser(u);
+        if (Platform.OS === 'web') {
+            if (window.confirm('Are you sure you want to sign out?')) doLogout();
+        } else {
+            Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
+                { text: 'Cancel', style: 'cancel' },
+                { text: 'Sign Out', style: 'destructive', onPress: doLogout },
+            ]);
         }
     };
 
     const handleExportData = async () => {
-        if (!user) return;
         setIsLoading(true);
         try {
-            // Aggregate all data
-            const health = await HealthService.getRecentEntries(user.user_id, 30);
-            const moods = await MoodService.getRecentMoods(user.user_id, 30);
-            const achievements = await AchievementService.getAchievements(user.user_id);
-
             const exportObj = {
-                user: user,
-                health_entries: health,
-                mood_entries: moods,
-                achievements: achievements,
-                exported_at: new Date().toISOString(),
-                app_version: "1.0.0"
+                user: {
+                    name: authUser?.name,
+                    email: authUser?.email,
+                    age: authUser?.age,
+                    heightCm: authUser?.heightCm,
+                    weightKg: authUser?.weightKg,
+                },
+                exportedAt: new Date().toISOString(),
+                note: 'Full health history export coming soon',
             };
-
-            const jsonString = JSON.stringify(exportObj, null, 2);
-
             await Share.share({
-                message: jsonString,
-                title: "HealthTwin Data Export"
+                message: JSON.stringify(exportObj, null, 2),
+                title: 'HealthTwin Data Export',
             });
-
-        } catch (error) {
-            Alert.alert("Error", "Failed to export data.");
+        } catch {
+            showToast('Export failed', 'error');
         } finally {
             setIsLoading(false);
         }
     };
 
-    const handleLogout = async () => {
-        Alert.alert(
-            "Sign Out",
-            "Are you sure you want to sign out?",
-            [
-                { text: "Cancel", style: "cancel" },
-                {
-                    text: "Sign Out",
-                    style: "destructive",
-                    onPress: async () => {
-                        await AsyncStorage.removeItem('USER_ID');
-                        // Reset navigation stack
-                        navigation.dispatch(
-                            CommonActions.reset({
-                                index: 0,
-                                routes: [{ name: "SignIn" }],
-                            })
-                        );
-                    }
-                }
-            ]
-        );
-    };
-
-    const handleResetToday = async () => {
-        Alert.alert(
-            "Reset Today",
-            "Clear data for today only? This allows you to test the Daily Log screen again.",
-            [
-                { text: "Cancel", style: "cancel" },
-                {
-                    text: "Reset",
-                    style: "destructive",
-                    onPress: async () => {
-                        try {
-                            if (user?.user_id) {
-                                const db = (await import('../../lib/database')).default.getDB();
-                                const today = new Date().toISOString().split('T')[0];
-                                // Delete today's entries
-                                await db.runAsync('DELETE FROM health_entries WHERE user_id = ? AND date = ?', [user.user_id, today]);
-                                await db.runAsync('DELETE FROM moods WHERE user_id = ? AND date = ?', [user.user_id, today]);
-
-                                showToast("Data cleared. Restarting...", "success");
-                                // Force reload or navigate
-                                navigation.dispatch(
-                                    CommonActions.reset({ index: 0, routes: [{ name: "DailyLog" }] })
-                                );
-                            }
-                        } catch (e) {
-                            showToast("Error resetting data", "error");
-                        }
-                    }
-                }
-            ]
-        );
-    };
-
     const handleDeleteAccount = async () => {
         Alert.alert(
             "Delete Account",
-            "This will permanently delete your profile and all recorded data. This action cannot be undone.",
+            "This will permanently delete your profile. This cannot be undone.",
             [
                 { text: "Cancel", style: "cancel" },
                 {
                     text: "Delete",
                     style: "destructive",
                     onPress: async () => {
-                        try {
-                            if (user?.user_id) {
-                                await UserService.deleteUser(user.user_id);
-                                await AsyncStorage.removeItem('USER_ID');
-                                navigation.dispatch(
-                                    CommonActions.reset({
-                                        index: 0,
-                                        routes: [{ name: "SignUp" }],
-                                    })
-                                );
-                            }
-                        } catch (e) {
-                            Alert.alert("Error", "Failed to delete account.");
-                        }
+                        await logout();
+                        showToast('Account deleted', 'info');
                     }
                 }
             ]
         );
     };
 
+    const handleSeedDemo = async () => {
+        setIsSeeding(true);
+        try {
+            const ok = await seedDemoWeek();
+            if (ok) showToast('🌱 7 days seeded! Check Weekly Summary & Achievements.', 'success');
+            else showToast('❌ Seed failed', 'error');
+        } catch {
+            showToast('❌ Network error', 'error');
+        } finally {
+            setIsSeeding(false);
+        }
+    };
+
+    // ─── Derived display values ───────────────────────────────────────────────────
+
+    const initials = authUser?.name
+        ? authUser.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
+        : '?';
+
     return (
         <ScreenLayout gradientBackground>
             {/* Header */}
             <View className="p-4 pt-2 flex-row items-center space-x-4">
-                <TouchableOpacity onPress={() => navigation.goBack()} className="w-10 h-10 rounded-full bg-white/20 items-center justify-center">
-                    <ChevronRight className="rotate-180" color="white" size={24} />
-                    {/* Using ChevronRight rotated as back arrow or just ArrowLeft if imported */}
+                <TouchableOpacity
+                    onPress={() => navigation.goBack()}
+                    className="w-10 h-10 rounded-full bg-white/20 items-center justify-center"
+                >
+                    <ChevronRight style={{ transform: [{ rotate: '180deg' }] }} color="white" size={24} />
                 </TouchableOpacity>
                 <View>
                     <Text className="text-white text-xl font-bold">Settings</Text>
@@ -218,24 +159,48 @@ export default function SettingsScreen({ navigation }: any) {
 
             <ScrollView className="flex-1 px-4 pt-4" contentContainerStyle={{ paddingBottom: 40 }}>
 
-                {/* Profile Section */}
-                <Text className="text-white/80 font-bold mb-2 ml-2 uppercase text-xs">Profile</Text>
+                {/* Profile Card */}
+                <View className="bg-white/10 rounded-2xl p-4 mb-6 flex-row items-center space-x-4">
+                    <View className="h-16 w-16 rounded-full bg-white/20 items-center justify-center overflow-hidden border-2 border-white/30">
+                        {authUser?.profileImage ? (
+                            <Image
+                                source={{ uri: authUser.profileImage }}
+                                style={{ width: 64, height: 64 }}
+                                resizeMode="cover"
+                            />
+                        ) : (
+                            <Text className="text-white font-bold text-xl">{initials}</Text>
+                        )}
+                    </View>
+                    <View>
+                        <Text className="text-white font-bold text-lg">{authUser?.name ?? '—'}</Text>
+                        <Text className="text-teal-200 text-sm">{authUser?.email ?? '—'}</Text>
+                        {authUser?.age && (
+                            <Text className="text-white/60 text-xs mt-1">
+                                {authUser.age}y · {authUser.heightCm}cm · {authUser.weightKg}kg
+                            </Text>
+                        )}
+                    </View>
+                </View>
+
+                {/* Profile Settings */}
+                <Text className="text-white/80 font-bold mb-2 ml-2 uppercase text-xs">Account</Text>
                 <View className="mb-6 rounded-2xl overflow-hidden shadow-sm">
                     <SettingItem
                         icon={<User size={20} color="#64748b" />}
-                        label="Name"
-                        value={user?.name || "Loading..."}
-                        onPress={() => console.log("Edit Name")}
+                        label="Account ID"
+                        value={authUser?.id ? `${authUser.id.substring(0, 12)}...` : '—'}
+                        onPress={() => { }}
                     />
                     <SettingItem
                         icon={<Shield size={20} color="#64748b" />}
-                        label="User ID"
-                        value={user?.user_id ? `${user.user_id.substring(0, 8)}...` : "..."}
+                        label="Email"
+                        value={authUser?.email ?? '—'}
                         onPress={() => { }}
                     />
                 </View>
 
-                {/* Preferences Section */}
+                {/* Preferences */}
                 <Text className="text-white/80 font-bold mb-2 ml-2 uppercase text-xs">Preferences</Text>
                 <View className="mb-6 rounded-2xl overflow-hidden shadow-sm">
                     <SettingItem
@@ -243,27 +208,21 @@ export default function SettingsScreen({ navigation }: any) {
                         label="Notifications"
                         isSwitch
                         value={notifications}
-                        onSwitchChange={(val: boolean) => {
+                        onSwitchChange={(val) => {
                             setNotifications(val);
-                            showToast(
-                                val ? "Notifications turned on" : "Notifications turned off",
-                                val ? "success" : "info"
-                            );
+                            showToast(val ? 'Notifications on' : 'Notifications off', val ? 'success' : 'info');
                         }}
                     />
                     <SettingItem
                         icon={<Moon size={20} color="#64748b" />}
                         label="Dark Mode"
                         isSwitch
-                        value={colorScheme === "dark"}
+                        value={colorScheme === 'dark'}
                         onSwitchChange={toggleColorScheme}
                     />
-                    <Text className="text-xs text-slate-400 text-center mt-2">
-                        Debug: Scheme is {colorScheme}
-                    </Text>
                 </View>
 
-                {/* Data Section */}
+                {/* Data & Privacy */}
                 <Text className="text-white/80 font-bold mb-2 ml-2 uppercase text-xs">Data & Privacy</Text>
                 <View className="mb-6 rounded-2xl overflow-hidden shadow-sm">
                     <SettingItem
@@ -272,14 +231,14 @@ export default function SettingsScreen({ navigation }: any) {
                         onPress={handleExportData}
                     />
                     <SettingItem
-                        icon={<Settings size={20} color="#f59e0b" />}
-                        label="Reset Today's Data (Debug)"
-                        onPress={handleResetToday}
-                    />
-                    <SettingItem
                         icon={<Database size={20} color="#8b5cf6" />}
                         label="View Database (Debug)"
                         onPress={() => navigation.navigate("DatabaseViewer")}
+                    />
+                    <SettingItem
+                        icon={<Database size={20} color="#10b981" />}
+                        label={isSeeding ? "Seeding 7 Days... ⏳" : "🌱 Seed 7 Days (Demo)"}
+                        onPress={handleSeedDemo}
                     />
                     <SettingItem
                         icon={<Trash2 size={20} color="#ef4444" />}
@@ -289,19 +248,19 @@ export default function SettingsScreen({ navigation }: any) {
                     />
                 </View>
 
-                {/* Logout */}
+
+                {/* Sign Out */}
                 <TouchableOpacity
                     onPress={handleLogout}
                     className="flex-row items-center justify-center p-4 bg-white/10 rounded-2xl border border-white/20 space-x-2"
                 >
                     <LogOut size={20} color="white" />
-                    <Text className="text-white font-bold text-lg">Sign Out</Text>
+                    <Text className="text-white font-bold text-lg ml-2">Sign Out</Text>
                 </TouchableOpacity>
 
                 <Text className="text-center text-white/40 text-xs mt-8">
-                    HealthTwin AI v1.0.0
+                    HealthTwin AI v1.0.0 · MongoDB Atlas
                 </Text>
-
             </ScrollView>
         </ScreenLayout>
     );

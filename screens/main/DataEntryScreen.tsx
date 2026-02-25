@@ -1,11 +1,15 @@
 import React, { useState } from "react";
-import { View, Text, ScrollView, TouchableOpacity } from "react-native";
+import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator } from "react-native";
 import Slider from "@react-native-community/slider";
 import { ScreenLayout } from "../../components/ScreenLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/Card";
 import { Button } from "../../components/ui/Button";
 import { Input } from "../../components/ui/Input";
 import { Activity, Moon, Smile, ArrowLeft, Save, Terminal, Calendar } from "lucide-react-native";
+import { logHealth, logMood } from "../../lib/api/auth";
+import { useAuth } from "../../contexts/AuthContext";
+import { useToast } from "../../components/ui/Toast";
+
 
 const sections = [
     {
@@ -29,7 +33,10 @@ const sections = [
 ];
 
 export default function DataEntryScreen({ navigation }: any) {
+    const { user } = useAuth();
+    const { showToast } = useToast();
     const [currentSection, setCurrentSection] = useState(0);
+    const [saving, setSaving] = useState(false);
 
     // Form State
     const [steps, setSteps] = useState("");
@@ -40,14 +47,38 @@ export default function DataEntryScreen({ navigation }: any) {
     const [energy, setEnergy] = useState(5);
     const [stress, setStress] = useState(3);
 
-    const handleNext = () => {
+    const handleNext = async () => {
         if (currentSection < sections.length - 1) {
             setCurrentSection(currentSection + 1);
         } else {
-            // Save
-            navigation.goBack();
+            // Last step — save to MongoDB
+            setSaving(true);
+            try {
+                const today = new Date().toISOString().split('T')[0];
+                const result = await logHealth({
+                    date: today,
+                    steps: parseInt(steps) || 0,
+                    sleepHours,
+                    energyScore: energy * 10,
+                });
+                if (mood) {
+                    await logMood({ date: today, mood, energyLevel: energy });
+                }
+                if (result) {
+                    showToast('✅ Vitals saved to MongoDB!', 'success');
+                    setTimeout(() => navigation.goBack(), 800);
+                } else {
+                    showToast('❌ Save failed — check your connection', 'error');
+                }
+            } catch (e) {
+                console.error('Save error:', e);
+                showToast('❌ Error saving data', 'error');
+            } finally {
+                setSaving(false);
+            }
         }
     };
+
 
     const renderSectionContent = () => {
         switch (currentSection) {
@@ -206,7 +237,7 @@ export default function DataEntryScreen({ navigation }: any) {
 
                     <View className="mt-4 pt-4 border-t border-slate-100">
                         <Button
-                            label={currentSection === sections.length - 1 ? "Save Entry" : "Next Section"}
+                            label={saving ? "Saving..." : (currentSection === sections.length - 1 ? "Save Entry" : "Next Section")}
                             onPress={handleNext}
                             icon={currentSection === sections.length - 1 ? <Save color="white" size={20} /> : undefined}
                         />

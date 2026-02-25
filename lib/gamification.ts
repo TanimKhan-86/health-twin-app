@@ -1,8 +1,9 @@
-import { HealthService, StreakService, AchievementService, Achievement } from './services';
+import { getStreak, getTodayHealth } from './api/auth';
 
 /**
- * Gamification Service
- * Handles rules for unlocking achievements and checking streaks.
+ * Gamification Service — MongoDB version
+ * Checks achievements client-side using live API data.
+ * Unlocked state is stored in-memory per session (no separate DB collection needed).
  */
 
 export const BADGES = [
@@ -52,78 +53,45 @@ export const BADGES = [
 
 export const GamificationService = {
     /**
-     * Check for new achievements based on latest activity
-     * Returns list of newly unlocked achievements
+     * Check which badges are unlocked based on live MongoDB data.
+     * Returns the list of badges with isUnlocked status.
      */
-    async checkAchievements(userId: string): Promise<Achievement[]> {
-        const newUnlocks: Achievement[] = [];
-
-        // 1. Get User Data
-        const streak = await StreakService.getStreak(userId);
-        const today = new Date().toISOString().split('T')[0];
-        const todayEntry = await HealthService.getHealthEntry(userId, today);
-        const allAchievements = await AchievementService.getAchievements(userId);
-        const unlockedIds = new Set(allAchievements.map(a => a.achievement_name)); // specific logic here using name as id for simplicity in this demo
-
-        // Helper to unlock
-        const tryUnlock = async (badgeId: string) => {
-            if (!unlockedIds.has(badgeId)) {
-                const badge = BADGES.find(b => b.id === badgeId);
-                if (badge) {
-                    const newAchievement: Achievement = {
-                        user_id: userId,
-                        achievement_type: badge.category,
-                        achievement_name: badge.id, // Storing ID as name for easy lookup
-                        metadata_json: JSON.stringify({ name: badge.name, icon: badge.icon, description: badge.description })
-                    };
-                    await AchievementService.unlockAchievement(newAchievement);
-                    newUnlocks.push(newAchievement);
-                }
-            }
-        };
-
-        // 2. Check Rules
-
-        // Rule: First Step (Any entry)
-        if (todayEntry) {
-            await tryUnlock('first_step');
-        }
-
-        // Rule: Streaks
-        if (streak) {
-            if (streak.current_streak >= 3) await tryUnlock('streak_3');
-            if (streak.current_streak >= 7) await tryUnlock('streak_7');
-        }
-
-        // Rule: Steps
-        if (todayEntry && (todayEntry.steps ?? 0) >= 10000) {
-            await tryUnlock('steps_10k');
-        }
-
-        // Rule: Sleep
-        if (todayEntry && (todayEntry.sleep_hours ?? 0) >= 8) {
-            await tryUnlock('sleep_8h');
-        }
-
-        // Rule: Energy
-        if (todayEntry && (todayEntry.energy_score ?? 0) >= 90) {
-            await tryUnlock('energy_master');
-        }
-
-        return newUnlocks;
+    async checkAchievements(_userId: string): Promise<void> {
+        // No-op: badge progress is computed in getBadgeProgress()
     },
 
     /**
-     * Get all badge definitions with unlocked status
+     * Get all badge definitions with unlocked status derived from
+     * the user's real streak and today's health entry (from MongoDB).
      */
-    async getBadgeProgress(userId: string) {
-        const unlocked = await AchievementService.getAchievements(userId);
-        const unlockedIds = new Set(unlocked.map(a => a.achievement_name));
+    async getBadgeProgress(_userId: string) {
+        try {
+            const [streakData, todayHealth] = await Promise.all([
+                getStreak(),
+                getTodayHealth(),
+            ]);
 
-        return BADGES.map(badge => ({
-            ...badge,
-            isUnlocked: unlockedIds.has(badge.id),
-            unlockedAt: unlocked.find(a => a.achievement_name === badge.id)?.unlocked_at
-        }));
-    }
+            const currentStreak = streakData?.currentStreak ?? 0;
+            const steps = (todayHealth as any)?.steps ?? 0;
+            const sleepHours = (todayHealth as any)?.sleepHours ?? 0;
+            const energyScore = (todayHealth as any)?.energyScore ?? 0;
+            const hasLoggedToday = todayHealth !== null;
+
+            return BADGES.map(badge => {
+                let isUnlocked = false;
+                switch (badge.id) {
+                    case 'first_step': isUnlocked = hasLoggedToday; break;
+                    case 'streak_3': isUnlocked = currentStreak >= 3; break;
+                    case 'streak_7': isUnlocked = currentStreak >= 7; break;
+                    case 'steps_10k': isUnlocked = steps >= 10000; break;
+                    case 'sleep_8h': isUnlocked = sleepHours >= 8; break;
+                    case 'energy_master': isUnlocked = energyScore >= 90; break;
+                }
+                return { ...badge, isUnlocked };
+            });
+        } catch (e) {
+            console.error('[Gamification] Failed to load badge progress:', e);
+            return BADGES.map(badge => ({ ...badge, isUnlocked: false }));
+        }
+    },
 };

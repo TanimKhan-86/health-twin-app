@@ -7,6 +7,8 @@ import { Card, CardContent } from "../../components/ui/Card";
 import { ArrowLeft, Activity, Moon, Zap, RefreshCw, TrendingUp } from "lucide-react-native";
 import { DigitalTwinAvatar } from "../../components/DigitalTwinAvatar";
 import { calculatePredictedEnergy, predictMoodState, generatePredictionInsight, generateHabitSimulation } from "../../lib/prediction/model";
+import { getHealthHistory } from "../../lib/api/auth";
+
 
 const screenWidth = Dimensions.get("window").width;
 
@@ -57,22 +59,32 @@ export default function WhatIfScreen({ navigation }: any) {
 
     const loadData = async () => {
         try {
-            // Simulating fetch delay
-            setTimeout(() => {
+            const history = await getHealthHistory(7);
+            if (history.length > 0) {
+                const h = history as any[];
+                const avgSteps = Math.round(h.reduce((s, e) => s + e.steps, 0) / h.length);
+                const avgSleep = h.reduce((s, e) => s + e.sleepHours, 0) / h.length;
+
+                setBaselineSteps(avgSteps);
+                setBaselineSleep(Number(avgSleep.toFixed(1)));
+                setBaselineEnergy(calculatePredictedEnergy(avgSleep, avgSteps));
+                setSimSteps(avgSteps);
+                setSimSleep(Number(avgSleep.toFixed(1)));
+            } else {
+                // No data yet — use sensible defaults
                 setBaselineSteps(6500);
                 setBaselineSleep(7.0);
                 setBaselineEnergy(calculatePredictedEnergy(7.0, 6500));
-
-                // Init sim values
                 setSimSteps(6500);
                 setSimSleep(7.0);
-                setLoading(false);
-            }, 500);
+            }
         } catch (e) {
             console.error(e);
+        } finally {
             setLoading(false);
         }
     };
+
 
     const resetSimulation = () => {
         setSimSteps(baselinesteps);
