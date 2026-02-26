@@ -2,6 +2,7 @@ import { Router, Response } from 'express';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import WeeklyAnalysisCache from '../models/WeeklyAnalysisCache';
+import { generateWellnessAnalysis } from '../lib/wellnessEngine';
 
 const router = Router();
 router.use(authenticate);
@@ -142,14 +143,31 @@ Format your response as JSON with this exact structure:
         res.json({ success: true, data: { ...parsed, fromCache: false, cacheWeek: weekKey } });
 
     } catch (err: any) {
-        console.error('Gemini AI error:', err?.message || err);
-        const isRateLimit = err?.message?.includes('quota') || err?.message?.includes('rate') || err?.status === 429;
-        res.status(isRateLimit ? 429 : 500).json({
-            success: false,
-            error: isRateLimit
-                ? 'Gemini AI rate limit reached. Please wait a minute and try again.'
-                : 'Could not generate AI analysis. Please check your connection and try again.',
-        });
+        console.warn('[AI] Gemini unavailable — activating rule-based fallback:', err?.message?.slice(0, 80));
+
+        // ── Fallback: generate analysis from rule-based engine ──────────────────
+        try {
+            const { healthData, moodData } = req.body;
+            const userId = req.userId!;
+            const weekKey = getWeekKey();
+
+            const fallback = generateWellnessAnalysis(healthData || [], moodData || []);
+
+            // Cache the fallback result so repeated calls are instant
+            await WeeklyAnalysisCache.findOneAndUpdate(
+                { userId, weekKey },
+                { userId, weekKey, ...fallback, createdAt: new Date() },
+                { upsert: true, new: true }
+            ).catch(() => { }); // Don't fail if cache write errors
+
+            res.json({ success: true, data: fallback });
+        } catch (fallbackErr: any) {
+            console.error('[AI] Fallback also failed:', fallbackErr?.message);
+            res.status(500).json({
+                success: false,
+                error: 'Could not generate your analysis. Please try again.',
+            });
+        }
     }
 });
 
