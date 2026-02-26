@@ -61,7 +61,7 @@ export default function AIWeeklyAnalysisScreen({ navigation }: any) {
         } catch (err: any) {
             console.error('AI analysis error:', err);
             setError(
-                err?.response?.data?.error ||
+                err?.message ||
                 'Could not generate your analysis. Please check your connection and try again.'
             );
         } finally {
