@@ -40,6 +40,6 @@ yarn-error.*
 /ios
 /android
 
-# Environment variables (never commit secrets)
-.env
-.env.local
+# Environment variables — included for dev sharing
+# .env
+# .env.local
