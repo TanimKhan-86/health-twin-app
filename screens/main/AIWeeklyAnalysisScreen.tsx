@@ -1,20 +1,19 @@
 import React, { useState, useCallback } from 'react';
-import {
-    View, Text, ScrollView, TouchableOpacity,
-    ActivityIndicator, StyleSheet,
-} from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator, StyleSheet } from 'react-native';
 import { ScreenLayout } from '../../components/ScreenLayout';
-import { Card, CardContent } from '../../components/ui/Card';
-import { ArrowLeft, Sparkles, Lightbulb, TrendingUp, AlertCircle } from 'lucide-react-native';
+import { ArrowLeft, Sparkles, Lightbulb, TrendingUp, AlertCircle, RefreshCw } from 'lucide-react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { getHealthHistory, getMoodHistory } from '../../lib/api/auth';
 import { apiFetch } from '../../lib/api/client';
+import { LinearGradient } from 'expo-linear-gradient';
 
 interface AIAnalysis {
     narrative: string;
     tips: string[];
     predictedOutcome: string;
     disclaimer: string;
+    fromCache?: boolean;
+    fromFallback?: boolean;
 }
 
 export default function AIWeeklyAnalysisScreen({ navigation }: any) {
@@ -23,152 +22,126 @@ export default function AIWeeklyAnalysisScreen({ navigation }: any) {
     const [error, setError] = useState<string | null>(null);
     const [healthCount, setHealthCount] = useState(0);
 
-    useFocusEffect(
-        useCallback(() => {
-            fetchAnalysis();
-        }, [])
-    );
+    useFocusEffect(useCallback(() => { fetchAnalysis(); }, []));
 
     const fetchAnalysis = async () => {
-        setLoading(true);
-        setError(null);
-        setAnalysis(null);
-
+        setLoading(true); setError(null); setAnalysis(null);
         try {
-            const [healthData, moodData] = await Promise.all([
-                getHealthHistory(7),
-                getMoodHistory(7),
-            ]);
-
+            const [healthData, moodData] = await Promise.all([getHealthHistory(7), getMoodHistory(7)]);
             setHealthCount((healthData as any[]).length);
-
             if ((healthData as any[]).length === 0) {
-                setError('No health data found for this week. Log at least one day to get your AI analysis!');
-                setLoading(false);
-                return;
+                setError('No health data found for this week. Log at least one day first, or use Settings → Seed Demo Data.');
+                setLoading(false); return;
             }
-
             const response = await apiFetch<AIAnalysis>('/api/ai/weekly-analysis', {
-                method: 'POST',
-                body: JSON.stringify({ healthData, moodData }),
+                method: 'POST', body: JSON.stringify({ healthData, moodData }),
             });
-
-            if (!response.success || !response.data) {
-                throw new Error(response.error || 'Failed to get AI analysis');
-            }
-
+            if (!response.success || !response.data) throw new Error(response.error || 'Failed to get AI analysis');
             setAnalysis(response.data);
         } catch (err: any) {
-            console.error('AI analysis error:', err);
-            setError(
-                err?.message ||
-                'Could not generate your analysis. Please check your connection and try again.'
-            );
-        } finally {
-            setLoading(false);
-        }
+            setError(err?.message || 'Could not generate your analysis. Please check your connection and try again.');
+        } finally { setLoading(false); }
     };
 
     return (
         <ScreenLayout gradientBackground>
             <View style={{ flex: 1 }}>
-                {/* Header */}
-                <View style={styles.header}>
-                    <TouchableOpacity
-                        onPress={() => navigation.goBack()}
-                        style={styles.backButton}
-                    >
-                        <ArrowLeft color="white" size={20} />
+                {/* Gradient Header */}
+                <LinearGradient colors={["#7c3aed", "#6d28d9"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.headerGrad}>
+                    <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
+                        <ArrowLeft color="white" size={18} />
                         <Text style={styles.backText}>Back</Text>
                     </TouchableOpacity>
-                    <View>
-                        <Text style={styles.title}>Your Weekly Analysis</Text>
-                        <Text style={styles.subtitle}>Powered by Gemini AI ✨</Text>
-                    </View>
-                </View>
+                    <Text style={styles.headerTitle}>Your Weekly Analysis</Text>
+                    <Text style={styles.headerSub}>Powered by Gemini AI ✨</Text>
+                </LinearGradient>
 
-                <ScrollView contentContainerStyle={styles.scroll}>
+                <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
 
-                    {/* Loading State */}
+                    {/* Loading */}
                     {loading && (
-                        <Card style={styles.card}>
-                            <CardContent style={styles.centeredContent}>
-                                <ActivityIndicator size="large" color="#0d9488" />
-                                <Text style={styles.loadingTitle}>Analysing your week...</Text>
-                                <Text style={styles.loadingSubtitle}>
-                                    Gemini AI is reviewing {healthCount > 0 ? `${healthCount} days` : 'your'} of health data
-                                </Text>
-                            </CardContent>
-                        </Card>
+                        <View style={styles.stateCard}>
+                            <ActivityIndicator size="large" color="#7c3aed" />
+                            <Text style={styles.stateTitle}>Analysing your week...</Text>
+                            <Text style={styles.stateSub}>Reviewing {healthCount > 0 ? `${healthCount} days` : 'your'} of health data</Text>
+                            <View style={styles.progressBar}><View style={styles.progressFill} /></View>
+                        </View>
                     )}
 
-                    {/* Error State */}
+                    {/* Error */}
                     {!loading && error && (
-                        <Card style={styles.card}>
-                            <CardContent style={styles.centeredContent}>
-                                <AlertCircle size={40} color="#ef4444" />
-                                <Text style={styles.errorTitle}>Analysis Unavailable</Text>
-                                <Text style={styles.errorText}>{error}</Text>
-                                <TouchableOpacity style={styles.retryButton} onPress={fetchAnalysis}>
+                        <View style={styles.stateCard}>
+                            <View style={styles.errorIconWrap}><AlertCircle size={32} color="#ef4444" /></View>
+                            <Text style={styles.errorTitle}>Analysis Unavailable</Text>
+                            <Text style={styles.stateSub}>{error}</Text>
+                            <TouchableOpacity onPress={fetchAnalysis} activeOpacity={0.85}>
+                                <LinearGradient colors={["#7c3aed", "#6d28d9"]} style={styles.retryBtn}>
                                     <Text style={styles.retryText}>Try Again</Text>
-                                </TouchableOpacity>
-                            </CardContent>
-                        </Card>
+                                </LinearGradient>
+                            </TouchableOpacity>
+                        </View>
                     )}
 
                     {/* Results */}
                     {!loading && analysis && (
                         <>
-                            {/* AI Narrative */}
-                            <Card style={styles.card}>
-                                <CardContent style={styles.narrativeContent}>
-                                    <View style={styles.sectionHeader}>
-                                        <Sparkles size={20} color="#0d9488" />
-                                        <Text style={styles.sectionTitle}>Your Week in Review</Text>
+                            {/* Source badge */}
+                            <View style={styles.sourceBadge}>
+                                <Text style={styles.sourceBadgeText}>
+                                    {analysis.fromCache ? '⚡ Cached result' : analysis.fromFallback ? '🔒 Smart analysis' : '🤖 Gemini AI'}
+                                </Text>
+                            </View>
+
+                            {/* Narrative */}
+                            <View style={styles.card}>
+                                <View style={styles.cardHeader}>
+                                    <View style={[styles.cardIconWrap, { backgroundColor: '#f5f3ff' }]}>
+                                        <Sparkles size={18} color="#7c3aed" />
                                     </View>
-                                    <View style={styles.narrativeBox}>
-                                        <Text style={styles.narrativeText}>"{analysis.narrative}"</Text>
-                                    </View>
-                                </CardContent>
-                            </Card>
+                                    <Text style={styles.cardTitle}>Your Week in Review</Text>
+                                </View>
+                                <View style={styles.narrativeBox}>
+                                    <Text style={styles.narrativeText}>"{analysis.narrative}"</Text>
+                                </View>
+                            </View>
 
                             {/* Tips */}
-                            <Card style={styles.card}>
-                                <CardContent>
-                                    <View style={styles.sectionHeader}>
-                                        <Lightbulb size={20} color="#f59e0b" />
-                                        <Text style={styles.sectionTitle}>3 Tips to Improve</Text>
+                            <View style={styles.card}>
+                                <View style={styles.cardHeader}>
+                                    <View style={[styles.cardIconWrap, { backgroundColor: '#fffbeb' }]}>
+                                        <Lightbulb size={18} color="#f59e0b" />
                                     </View>
-                                    {analysis.tips.map((tip, index) => (
-                                        <View key={index} style={styles.tipRow}>
-                                            <View style={styles.tipBadge}>
-                                                <Text style={styles.tipNumber}>{index + 1}</Text>
-                                            </View>
-                                            <Text style={styles.tipText}>{tip}</Text>
-                                        </View>
-                                    ))}
-                                </CardContent>
-                            </Card>
+                                    <Text style={styles.cardTitle}>3 Tips to Improve</Text>
+                                </View>
+                                {analysis.tips.map((tip, i) => (
+                                    <View key={i} style={styles.tipRow}>
+                                        <View style={styles.tipBadge}><Text style={styles.tipNum}>{i + 1}</Text></View>
+                                        <Text style={styles.tipText}>{tip}</Text>
+                                    </View>
+                                ))}
+                            </View>
 
-                            {/* Predicted Outcome */}
-                            <Card style={styles.outcomeCard}>
-                                <CardContent>
-                                    <View style={styles.sectionHeader}>
-                                        <TrendingUp size={20} color="#10b981" />
-                                        <Text style={[styles.sectionTitle, { color: '#fff' }]}>If You Follow These Tips...</Text>
+                            {/* Outcome */}
+                            <TouchableOpacity activeOpacity={0.95}>
+                                <LinearGradient colors={["#7c3aed", "#6d28d9"]} style={styles.outcomeCard}>
+                                    <View style={styles.cardHeader}>
+                                        <View style={[styles.cardIconWrap, { backgroundColor: 'rgba(255,255,255,0.2)' }]}>
+                                            <TrendingUp size={18} color="#fff" />
+                                        </View>
+                                        <Text style={[styles.cardTitle, { color: '#fff' }]}>In 2 Weeks...</Text>
                                     </View>
                                     <Text style={styles.outcomeText}>{analysis.predictedOutcome}</Text>
-                                </CardContent>
-                            </Card>
+                                </LinearGradient>
+                            </TouchableOpacity>
 
                             {/* Disclaimer */}
                             <View style={styles.disclaimerBox}>
                                 <Text style={styles.disclaimerText}>{analysis.disclaimer}</Text>
                             </View>
 
-                            {/* Refresh Button */}
-                            <TouchableOpacity style={styles.refreshButton} onPress={fetchAnalysis}>
-                                <Sparkles size={16} color="#fff" />
+                            {/* Refresh */}
+                            <TouchableOpacity onPress={fetchAnalysis} style={styles.refreshBtn} activeOpacity={0.8}>
+                                <RefreshCw size={16} color="#7c3aed" />
                                 <Text style={styles.refreshText}>Regenerate Analysis</Text>
                             </TouchableOpacity>
                         </>
@@ -180,84 +153,44 @@ export default function AIWeeklyAnalysisScreen({ navigation }: any) {
 }
 
 const styles = StyleSheet.create({
-    header: {
-        padding: 16,
-        paddingTop: 8,
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 12,
-    },
-    backButton: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor: 'rgba(255,255,255,0.2)',
-        paddingHorizontal: 12,
-        paddingVertical: 8,
-        borderRadius: 20,
-        gap: 4,
-    },
-    backText: { color: '#fff', fontWeight: 'bold' },
-    title: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
-    subtitle: { color: '#99f6e4', fontSize: 12 },
-    scroll: { padding: 16, paddingBottom: 48 },
-    card: { marginBottom: 16, backgroundColor: 'rgba(255,255,255,0.97)' },
-    centeredContent: { alignItems: 'center', padding: 32, gap: 12 },
-    loadingTitle: { fontSize: 16, fontWeight: 'bold', color: '#1e293b', marginTop: 8 },
-    loadingSubtitle: { fontSize: 13, color: '#64748b', textAlign: 'center' },
-    errorTitle: { fontSize: 16, fontWeight: 'bold', color: '#ef4444', marginTop: 8 },
-    errorText: { fontSize: 13, color: '#64748b', textAlign: 'center', lineHeight: 20 },
-    retryButton: {
-        marginTop: 12,
-        backgroundColor: '#0d9488',
-        paddingHorizontal: 24,
-        paddingVertical: 10,
-        borderRadius: 20,
-    },
-    retryText: { color: '#fff', fontWeight: 'bold' },
-    narrativeContent: { padding: 20 },
-    sectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 },
-    sectionTitle: { fontSize: 15, fontWeight: 'bold', color: '#1e293b' },
-    narrativeBox: {
-        backgroundColor: '#f0fdfa',
-        padding: 16,
-        borderRadius: 12,
-        borderWidth: 1,
-        borderColor: '#ccfbf1',
-    },
-    narrativeText: { color: '#0f766e', fontSize: 14, lineHeight: 22, fontStyle: 'italic' },
+    headerGrad: { paddingHorizontal: 20, paddingTop: 10, paddingBottom: 28 },
+    backBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(255,255,255,0.2)', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, alignSelf: 'flex-start', marginBottom: 16 },
+    backText: { color: '#fff', fontWeight: '700', fontSize: 14 },
+    headerTitle: { fontSize: 24, fontWeight: '800', color: '#fff' },
+    headerSub: { fontSize: 13, color: 'rgba(255,255,255,0.75)', marginTop: 4 },
+
+    scroll: { padding: 16, paddingTop: 4, paddingBottom: 60 },
+
+    stateCard: { backgroundColor: '#fff', borderRadius: 24, padding: 32, alignItems: 'center', gap: 12, marginTop: 8, shadowColor: '#7c3aed', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.1, shadowRadius: 16, elevation: 4 },
+    stateTitle: { fontSize: 17, fontWeight: '700', color: '#1e1b4b' },
+    stateSub: { fontSize: 13, color: '#6b7280', textAlign: 'center', lineHeight: 20 },
+    progressBar: { width: '100%', height: 4, backgroundColor: '#f3f0ff', borderRadius: 4, marginTop: 8 },
+    progressFill: { width: '60%', height: 4, backgroundColor: '#7c3aed', borderRadius: 4 },
+    errorIconWrap: { width: 64, height: 64, borderRadius: 32, backgroundColor: '#fef2f2', alignItems: 'center', justifyContent: 'center' },
+    errorTitle: { fontSize: 17, fontWeight: '700', color: '#ef4444' },
+    retryBtn: { borderRadius: 16, paddingHorizontal: 32, paddingVertical: 14, marginTop: 4 },
+    retryText: { color: '#fff', fontWeight: '700', fontSize: 15 },
+
+    sourceBadge: { alignSelf: 'center', backgroundColor: '#f5f3ff', borderRadius: 20, paddingHorizontal: 16, paddingVertical: 6, marginBottom: 12, borderWidth: 1, borderColor: '#e9d5ff' },
+    sourceBadgeText: { fontSize: 12, color: '#7c3aed', fontWeight: '600' },
+
+    card: { backgroundColor: '#fff', borderRadius: 20, padding: 20, marginBottom: 12, shadowColor: '#7c3aed', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.07, shadowRadius: 12, elevation: 3, borderWidth: 1, borderColor: '#f3f0ff' },
+    cardHeader: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 14 },
+    cardIconWrap: { width: 36, height: 36, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+    cardTitle: { fontSize: 15, fontWeight: '700', color: '#1e1b4b' },
+    narrativeBox: { backgroundColor: '#f5f3ff', borderRadius: 14, padding: 16, borderLeftWidth: 3, borderLeftColor: '#7c3aed' },
+    narrativeText: { color: '#4c1d95', fontSize: 14, lineHeight: 22, fontStyle: 'italic' },
     tipRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, marginBottom: 12 },
-    tipBadge: {
-        width: 28, height: 28, borderRadius: 14,
-        backgroundColor: '#fef3c7',
-        alignItems: 'center', justifyContent: 'center',
-        flexShrink: 0,
-    },
-    tipNumber: { color: '#92400e', fontWeight: 'bold', fontSize: 13 },
-    tipText: { flex: 1, color: '#334155', fontSize: 14, lineHeight: 20 },
-    outcomeCard: {
-        marginBottom: 16,
-        backgroundColor: '#0d9488',
-    },
-    outcomeText: { color: '#fff', fontSize: 14, lineHeight: 22, fontWeight: '500' },
-    disclaimerBox: {
-        backgroundColor: 'rgba(255,255,255,0.15)',
-        borderRadius: 12,
-        padding: 12,
-        marginBottom: 16,
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.25)',
-    },
-    disclaimerText: { color: 'rgba(255,255,255,0.8)', fontSize: 11, textAlign: 'center', lineHeight: 16 },
-    refreshButton: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: 8,
-        backgroundColor: 'rgba(255,255,255,0.2)',
-        padding: 14,
-        borderRadius: 14,
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.3)',
-    },
-    refreshText: { color: '#fff', fontWeight: 'bold', fontSize: 14 },
+    tipBadge: { width: 28, height: 28, borderRadius: 14, backgroundColor: '#7c3aed', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+    tipNum: { color: '#fff', fontWeight: '800', fontSize: 12 },
+    tipText: { flex: 1, color: '#374151', fontSize: 14, lineHeight: 21 },
+
+    outcomeCard: { borderRadius: 20, padding: 20, marginBottom: 12, shadowColor: '#7c3aed', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 12, elevation: 5 },
+    outcomeText: { color: 'rgba(255,255,255,0.9)', fontSize: 14, lineHeight: 22, fontWeight: '500' },
+
+    disclaimerBox: { backgroundColor: '#fff', borderRadius: 14, padding: 14, marginBottom: 12, borderWidth: 1, borderColor: '#f3f0ff' },
+    disclaimerText: { color: '#9ca3af', fontSize: 11, textAlign: 'center', lineHeight: 17 },
+
+    refreshBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#f5f3ff', borderRadius: 16, paddingVertical: 14, borderWidth: 1.5, borderColor: '#e9d5ff' },
+    refreshText: { color: '#7c3aed', fontWeight: '700', fontSize: 14 },
 });

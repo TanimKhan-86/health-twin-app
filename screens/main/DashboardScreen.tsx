@@ -1,35 +1,29 @@
 import React, { useState, useCallback } from "react";
-import { View, Text, ScrollView, TouchableOpacity, Image } from "react-native";
-
+import { View, Text, ScrollView, TouchableOpacity, Image, StyleSheet } from "react-native";
 import { ScreenLayout } from "../../components/ScreenLayout";
 import { DigitalTwinAvatar } from "../../components/DigitalTwinAvatar";
-import { Card, CardContent } from "../../components/ui/Card";
-import { Activity, Heart, Moon, Wind, Droplets, Trophy } from "lucide-react-native";
+import { Activity, Heart, Moon, Droplets, Trophy, Zap } from "lucide-react-native";
 import { useFocusEffect } from "@react-navigation/native";
 import { useAuth } from "../../contexts/AuthContext";
 import { getStreak, getTodayHealth } from "../../lib/api/auth";
-
+import { LinearGradient } from "expo-linear-gradient";
 
 interface MetricCardProps {
     icon: React.ReactNode;
     label: string;
     value: string;
     subValue: string;
-    color: string;
+    iconBg: string;
 }
 
-function MetricCard({ icon, label, value, subValue, color }: MetricCardProps) {
+function MetricCard({ icon, label, value, subValue, iconBg }: MetricCardProps) {
     return (
-        <Card className="flex-1 m-1 bg-white/90 dark:bg-slate-800/90 backdrop-blur-sm shadow-sm border-0">
-            <CardContent className="p-4 items-center space-y-2">
-                <View className={`p-2 rounded-full bg-opacity-10 ${color.replace("text-", "bg-")}`}>
-                    {icon}
-                </View>
-                <Text className="text-xl font-bold text-slate-800 dark:text-slate-100">{value}</Text>
-                <Text className="text-xs font-medium text-slate-500 dark:text-slate-400">{label}</Text>
-                <Text className={`text-[10px] font-bold ${color}`}>{subValue}</Text>
-            </CardContent>
-        </Card>
+        <View style={styles.metricCard}>
+            <View style={[styles.metricIcon, { backgroundColor: iconBg }]}>{icon}</View>
+            <Text style={styles.metricValue}>{value}</Text>
+            <Text style={styles.metricLabel}>{label}</Text>
+            <Text style={styles.metricSub}>{subValue}</Text>
+        </View>
     );
 }
 
@@ -38,213 +32,177 @@ export default function DashboardScreen({ navigation }: any) {
     const [streak, setStreak] = useState(0);
     const [todayHealth, setTodayHealth] = useState<any>(null);
 
-    useFocusEffect(
-        useCallback(() => {
-            loadDashboard();
-        }, [])
-    );
+    useFocusEffect(useCallback(() => { loadDashboard(); }, []));
 
     const loadDashboard = async () => {
         try {
-            const [streakData, health] = await Promise.all([
-                getStreak(),
-                getTodayHealth(),
-            ]);
+            const [streakData, health] = await Promise.all([getStreak(), getTodayHealth()]);
             setStreak(streakData?.currentStreak ?? 0);
             setTodayHealth(health);
-        } catch (e) {
-            console.warn('Dashboard load error:', e);
-        }
+        } catch (e) { console.warn('Dashboard load error:', e); }
     };
 
     const firstName = user?.name?.split(' ')[0] || 'there';
     const initials = user?.name
-        ? user.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
+        ? user.name.split(' ').map((n: string) => n[0]).join('').toUpperCase().slice(0, 2)
         : '?';
 
     return (
         <ScreenLayout gradientBackground>
-            <ScrollView className="flex-1" contentContainerStyle={{ paddingBottom: 100 }}>
+            <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+
                 {/* Header */}
-                <View className="p-6 flex-row justify-between items-center">
+                <View style={styles.header}>
                     <View>
-                        <Text className="text-teal-100 font-medium">Good morning,</Text>
-                        <Text className="text-2xl font-bold text-white">{firstName} 👋</Text>
+                        <Text style={styles.greeting}>Good morning,</Text>
+                        <Text style={styles.name}>{firstName} 👋</Text>
                     </View>
-
-                    <View className="flex-row space-x-3">
-                        {/* Streak Badge */}
-                        <TouchableOpacity
-                            onPress={() => navigation.navigate('Achievements')}
-                            className="h-10 px-3 rounded-full bg-orange-500/20 border border-orange-500/50 flex-row items-center space-x-1"
-                        >
-                            <Text className="text-lg">🔥</Text>
-                            <Text className="text-white font-bold">{streak}</Text>
+                    <View style={styles.headerRight}>
+                        <TouchableOpacity onPress={() => navigation.navigate('Achievements')} style={styles.streakBadge}>
+                            <Text style={styles.streakEmoji}>🔥</Text>
+                            <Text style={styles.streakNum}>{streak}</Text>
                         </TouchableOpacity>
-
-                        {/* Profile Avatar */}
-                        <TouchableOpacity
-                            onPress={() => navigation.navigate("Settings")}
-                            className="h-10 w-10 rounded-full bg-white/20 items-center justify-center border border-white/30 overflow-hidden"
-                        >
-                            {user?.profileImage ? (
-                                <Image
-                                    source={{ uri: user.profileImage }}
-                                    style={{ width: 40, height: 40, borderRadius: 20 }}
-                                    resizeMode="cover"
-                                />
-                            ) : (
-                                <Text className="text-white font-bold text-sm">{initials}</Text>
-                            )}
+                        <TouchableOpacity onPress={() => navigation.navigate("Settings")} style={styles.avatarWrap}>
+                            {user?.profileImage
+                                ? <Image source={{ uri: user.profileImage }} style={styles.avatarImg} />
+                                : <Text style={styles.avatarInitials}>{initials}</Text>}
                         </TouchableOpacity>
                     </View>
                 </View>
 
                 {/* Avatar Section */}
-                <View className="h-[300px] justify-center">
+                <View style={styles.avatarSection}>
                     <DigitalTwinAvatar />
-                    <View className="absolute bottom-4 w-full items-center">
-                        <View className="bg-white/10 backdrop-blur-md px-4 py-2 rounded-full border border-white/20">
-                            <Text className="text-white text-sm font-medium">
-                                Your health data is stored securely in the cloud ☁️
-                            </Text>
-                        </View>
-                    </View>
                 </View>
 
-                {/* Quick Stats Grid */}
-                <View className="px-4">
-                    <Text className="text-white font-semibold mb-4 ml-1">Live Health Metrics</Text>
-                    <View className="flex-row justify-between mb-2">
+                {/* Metric Cards */}
+                <View style={styles.metricsContainer}>
+                    <Text style={styles.sectionTitle}>Live Health Metrics</Text>
+                    <View style={styles.metricsGrid}>
                         <MetricCard
-                            icon={<Heart color="#ef4444" size={20} />}
-                            label="Heart Rate"
-                            value="72 BPM"
-                            subValue="Normal"
-                            color="text-red-500"
+                            icon={<Heart color="#ef4444" size={18} />} iconBg="#fef2f2"
+                            label="Heart Rate" value="72 BPM" subValue="Normal"
                         />
                         <MetricCard
-                            icon={<Activity color="#3b82f6" size={20} />}
+                            icon={<Activity color="#7c3aed" size={18} />} iconBg="#f5f3ff"
                             label="Steps"
                             value={todayHealth?.steps != null ? todayHealth.steps.toLocaleString() : '—'}
-                            subValue={todayHealth?.steps != null ? (todayHealth.steps >= 8000 ? 'Great! 🏃' : 'Keep going!') : 'Log today'}
-                            color="text-blue-500"
+                            subValue={todayHealth?.steps != null ? (todayHealth.steps >= 8000 ? '🏃 Great!' : 'Keep going!') : 'Log today'}
                         />
-                    </View>
-                    <View className="flex-row justify-between">
                         <MetricCard
-                            icon={<Moon color="#8b5cf6" size={20} />}
+                            icon={<Moon color="#6366f1" size={18} />} iconBg="#eef2ff"
                             label="Sleep"
                             value={todayHealth?.sleepHours != null ? `${todayHealth.sleepHours}h` : '—'}
-                            subValue={todayHealth?.sleepHours != null ? (todayHealth.sleepHours >= 7 ? 'Well rested 😴' : 'Need more rest') : 'Log today'}
-                            color="text-purple-500"
+                            subValue={todayHealth?.sleepHours != null ? (todayHealth.sleepHours >= 7 ? '😴 Rested' : 'Need rest') : 'Log today'}
                         />
                         <MetricCard
-                            icon={<Droplets color="#06b6d4" size={20} />}
+                            icon={<Zap color="#f59e0b" size={18} />} iconBg="#fffbeb"
                             label="Energy"
                             value={todayHealth?.energyScore != null ? `${Math.round(todayHealth.energyScore)}` : '—'}
-                            subValue={todayHealth?.energyScore != null ? (todayHealth.energyScore >= 70 ? 'High energy ⚡' : 'Low energy') : 'Log today'}
-                            color="text-cyan-500"
+                            subValue={todayHealth?.energyScore != null ? (todayHealth.energyScore >= 70 ? '⚡ High' : 'Low') : 'Log today'}
                         />
                     </View>
                 </View>
 
                 {/* Quick Actions */}
-                <View className="p-6 pt-4 flex-row justify-between">
-                    <TouchableOpacity
-                        className="bg-purple-600/20 p-4 rounded-2xl flex-1 mr-2 items-center border border-purple-500/30"
-                        onPress={() => navigation.navigate('WhatIf')}
-                    >
-                        <Text className="text-purple-200 font-bold">🔮 Future You</Text>
+                <View style={styles.quickActions}>
+                    <TouchableOpacity style={styles.quickBtn} onPress={() => navigation.navigate('WhatIf')}>
+                        <Text style={styles.quickBtnText}>🔮 Future You</Text>
                     </TouchableOpacity>
-
-                    <TouchableOpacity
-                        className="bg-teal-600/20 p-4 rounded-2xl flex-1 ml-2 items-center border border-teal-500/30"
-                        onPress={() => navigation.navigate('Analytics')}
-                    >
-                        <Text className="text-teal-200 font-bold">📊 Analytics</Text>
+                    <TouchableOpacity style={[styles.quickBtn, styles.quickBtnRight]} onPress={() => navigation.navigate('Analytics')}>
+                        <Text style={styles.quickBtnText}>📊 Analytics</Text>
                     </TouchableOpacity>
                 </View>
 
-                {/* Action Buttons */}
-                <View className="p-4 mt-2 space-y-3">
-                    <TouchableOpacity
-                        className="bg-white dark:bg-slate-800 p-4 rounded-xl flex-row items-center justify-between shadow-sm"
-                        onPress={() => navigation.navigate("DataEntry")}
-                    >
-                        <View className="flex-row items-center space-x-3">
-                            <View className="bg-teal-100 dark:bg-teal-900/50 p-2 rounded-full">
-                                <Activity size={20} color="#0d9488" />
+                {/* Action List */}
+                <View style={styles.actionList}>
+                    {[
+                        { icon: '📋', label: 'Log Daily Vitals', sub: 'Saved to MongoDB ☁️', screen: 'DataEntry', color: '#7c3aed' },
+                        { icon: '🌀', label: 'What-If Scenarios', sub: 'AI Predictions', screen: 'WhatIf', color: '#6366f1' },
+                        { icon: '🏆', label: 'Achievements', sub: `🔥 ${streak} day streak`, screen: 'Achievements', color: '#f59e0b' },
+                        { icon: '📈', label: 'Weekly Summary', sub: "Your Twin's Report", screen: 'WeeklySummary', color: '#10b981' },
+                    ].map((item) => (
+                        <TouchableOpacity key={item.screen} style={styles.actionRow} onPress={() => navigation.navigate(item.screen)} activeOpacity={0.7}>
+                            <View style={[styles.actionIconWrap, { backgroundColor: item.color + '18' }]}>
+                                <Text style={styles.actionIconEmoji}>{item.icon}</Text>
                             </View>
-                            <View>
-                                <Text className="font-bold text-slate-800 dark:text-slate-100">Log Daily Vitals</Text>
-                                <Text className="text-slate-500 dark:text-slate-400 text-xs">Saved to MongoDB ☁️</Text>
+                            <View style={{ flex: 1 }}>
+                                <Text style={styles.actionLabel}>{item.label}</Text>
+                                <Text style={styles.actionSub}>{item.sub}</Text>
                             </View>
-                        </View>
-                    </TouchableOpacity>
+                            <Text style={styles.actionChevron}>›</Text>
+                        </TouchableOpacity>
+                    ))}
 
-                    <TouchableOpacity
-                        className="bg-white dark:bg-slate-800 p-4 rounded-xl flex-row items-center justify-between shadow-sm"
-                        onPress={() => navigation.navigate("WhatIf")}
-                    >
-                        <View className="flex-row items-center space-x-3">
-                            <View className="bg-indigo-100 dark:bg-indigo-900/50 p-2 rounded-full">
-                                <Wind size={20} color="#4f46e5" />
+                    {/* AI Weekly Analysis — featured */}
+                    <TouchableOpacity onPress={() => navigation.navigate("AIWeeklyAnalysis")} activeOpacity={0.85}>
+                        <LinearGradient
+                            colors={["#7c3aed", "#6d28d9"]}
+                            start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+                            style={styles.aiActionRow}
+                        >
+                            <View style={styles.aiIconWrap}>
+                                <Text style={{ fontSize: 22 }}>🤖</Text>
                             </View>
-                            <View>
-                                <Text className="font-bold text-slate-800 dark:text-slate-100">What-If Scenarios</Text>
-                                <Text className="text-slate-500 dark:text-slate-400 text-xs">AI Predictions</Text>
+                            <View style={{ flex: 1 }}>
+                                <Text style={styles.aiActionLabel}>Your Weekly Analysis</Text>
+                                <Text style={styles.aiActionSub}>Powered by Gemini AI ✨</Text>
                             </View>
-                        </View>
-                    </TouchableOpacity>
-
-                    <TouchableOpacity
-                        className="bg-white dark:bg-slate-800 p-4 rounded-xl flex-row items-center justify-between shadow-sm"
-                        onPress={() => navigation.navigate("Achievements")}
-                    >
-                        <View className="flex-row items-center space-x-3">
-                            <View className="bg-amber-100 dark:bg-amber-900/50 p-2 rounded-full">
-                                <Trophy size={20} color="#d97706" />
-                            </View>
-                            <View>
-                                <Text className="font-bold text-slate-800 dark:text-slate-100">Achievements</Text>
-                                <Text className="text-slate-500 dark:text-slate-400 text-xs">🔥 {streak} day streak</Text>
-                            </View>
-                        </View>
-                    </TouchableOpacity>
-
-                    <TouchableOpacity
-                        className="bg-white dark:bg-slate-800 p-4 rounded-xl flex-row items-center justify-between shadow-sm"
-                        onPress={() => navigation.navigate("WeeklySummary")}
-                    >
-                        <View className="flex-row items-center space-x-3">
-                            <View className="bg-emerald-100 dark:bg-emerald-900/50 p-2 rounded-full">
-                                <Activity size={20} color="#10b981" />
-                            </View>
-                            <View>
-                                <Text className="font-bold text-slate-800 dark:text-slate-100">Weekly Summary</Text>
-                                <Text className="text-slate-500 dark:text-slate-400 text-xs">Your Twin's Report</Text>
-                            </View>
-                        </View>
-                    </TouchableOpacity>
-
-                    <TouchableOpacity
-                        className="bg-gradient-to-r from-teal-600/20 to-purple-600/20 p-4 rounded-xl flex-row items-center justify-between shadow-sm border border-teal-500/30"
-                        onPress={() => navigation.navigate("AIWeeklyAnalysis")}
-                        style={{ backgroundColor: 'rgba(13, 148, 136, 0.15)', borderWidth: 1, borderColor: 'rgba(13, 148, 136, 0.4)' }}
-                    >
-                        <View className="flex-row items-center space-x-3">
-                            <View style={{ backgroundColor: 'rgba(13, 148, 136, 0.2)', padding: 8, borderRadius: 20 }}>
-                                <Activity size={20} color="#0d9488" />
-                            </View>
-                            <View>
-                                <Text className="font-bold text-teal-700 dark:text-teal-300">🤖 Your Weekly Analysis</Text>
-                                <Text className="text-slate-500 dark:text-slate-400 text-xs">Powered by Gemini AI ✨</Text>
-                            </View>
-                        </View>
+                            <Text style={styles.aiChevron}>›</Text>
+                        </LinearGradient>
                     </TouchableOpacity>
                 </View>
             </ScrollView>
         </ScreenLayout>
     );
 }
+
+const styles = StyleSheet.create({
+    scroll: { paddingBottom: 100 },
+    header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 24, paddingTop: 8, paddingBottom: 4 },
+    greeting: { fontSize: 14, color: '#6d28d9', fontWeight: '500' },
+    name: { fontSize: 24, fontWeight: '800', color: '#1e1b4b' },
+    headerRight: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+    streakBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.7)', borderRadius: 20, paddingHorizontal: 12, paddingVertical: 6, gap: 4, borderWidth: 1, borderColor: '#e9d5ff' },
+    streakEmoji: { fontSize: 16 },
+    streakNum: { fontWeight: '800', color: '#7c3aed', fontSize: 15 },
+    avatarWrap: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#7c3aed', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', borderWidth: 2, borderColor: '#fff' },
+    avatarImg: { width: 40, height: 40, borderRadius: 20 },
+    avatarInitials: { color: '#fff', fontWeight: '800', fontSize: 14 },
+
+    avatarSection: { height: 280, justifyContent: 'center' },
+
+    metricsContainer: { paddingHorizontal: 20, marginBottom: 16 },
+    sectionTitle: { fontSize: 16, fontWeight: '700', color: '#1e1b4b', marginBottom: 12 },
+    metricsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+    metricCard: {
+        flex: 1, minWidth: '45%', backgroundColor: '#ffffff',
+        borderRadius: 20, padding: 16, alignItems: 'center',
+        shadowColor: '#7c3aed', shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.08, shadowRadius: 12, elevation: 3,
+        borderWidth: 1, borderColor: '#f3f0ff',
+    },
+    metricIcon: { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center', marginBottom: 8 },
+    metricValue: { fontSize: 20, fontWeight: '800', color: '#1e1b4b' },
+    metricLabel: { fontSize: 11, color: '#6b7280', fontWeight: '500', marginTop: 2 },
+    metricSub: { fontSize: 10, fontWeight: '700', color: '#7c3aed', marginTop: 2 },
+
+    quickActions: { flexDirection: 'row', paddingHorizontal: 20, marginBottom: 16, gap: 10 },
+    quickBtn: { flex: 1, backgroundColor: '#ffffff', borderRadius: 16, paddingVertical: 14, alignItems: 'center', borderWidth: 1.5, borderColor: '#e9d5ff', shadowColor: '#7c3aed', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 2 },
+    quickBtnRight: {},
+    quickBtnText: { fontWeight: '700', color: '#4c1d95', fontSize: 14 },
+
+    actionList: { paddingHorizontal: 20, gap: 10 },
+    actionRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#ffffff', borderRadius: 18, padding: 16, gap: 14, shadowColor: '#7c3aed', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 10, elevation: 2, borderWidth: 1, borderColor: '#f3f0ff' },
+    actionIconWrap: { width: 44, height: 44, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+    actionIconEmoji: { fontSize: 20 },
+    actionLabel: { fontSize: 15, fontWeight: '700', color: '#1e1b4b' },
+    actionSub: { fontSize: 12, color: '#9ca3af', marginTop: 2 },
+    actionChevron: { fontSize: 22, color: '#c4b5fd', fontWeight: '300' },
+
+    aiActionRow: { flexDirection: 'row', alignItems: 'center', borderRadius: 18, padding: 16, gap: 14, shadowColor: '#7c3aed', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 12, elevation: 6 },
+    aiIconWrap: { width: 44, height: 44, borderRadius: 14, backgroundColor: 'rgba(255,255,255,0.2)', alignItems: 'center', justifyContent: 'center' },
+    aiActionLabel: { fontSize: 15, fontWeight: '700', color: '#ffffff' },
+    aiActionSub: { fontSize: 12, color: 'rgba(255,255,255,0.75)', marginTop: 2 },
+    aiChevron: { fontSize: 22, color: 'rgba(255,255,255,0.6)', fontWeight: '300' },
+});

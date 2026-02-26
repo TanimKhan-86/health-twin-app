@@ -1,85 +1,76 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, ScrollView, Image, TouchableOpacity } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from 'react-native';
 import { ScreenLayout } from '../../components/ScreenLayout';
-import { Card, CardContent } from '../../components/ui/Card';
-import { ArrowLeft, Lock, Trophy } from 'lucide-react-native';
+import { ArrowLeft, Lock } from 'lucide-react-native';
 import { GamificationService } from '../../lib/gamification';
 import { useAuth } from '../../contexts/AuthContext';
+import { LinearGradient } from 'expo-linear-gradient';
 
 export default function AchievementsScreen({ navigation }: any) {
     const { user } = useAuth();
     const [badges, setBadges] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
 
-    useEffect(() => {
-        loadBadges();
-    }, [user]);
+    useEffect(() => { loadBadges(); }, [user]);
 
     const loadBadges = async () => {
         try {
             const userId = user?.id ?? 'demo-user';
-            // Force check achievements first to ensure latest state
             await GamificationService.checkAchievements(userId);
             const data = await GamificationService.getBadgeProgress(userId);
             setBadges(data);
-        } catch (e) {
-            console.error(e);
-        } finally {
-            setLoading(false);
-        }
+        } catch (e) { console.error(e); }
+        finally { setLoading(false); }
     };
+
+    const unlockedCount = badges.filter(b => b.isUnlocked).length;
+    const totalCount = badges.length;
 
     return (
         <ScreenLayout gradientBackground>
-            <View className="flex-1">
-                {/* Header */}
-                <View className="p-4 pt-2 flex-row items-center space-x-4">
-                    <TouchableOpacity onPress={() => navigation.goBack()} className="flex-row items-center bg-white/20 px-3 py-2 rounded-full">
-                        <ArrowLeft color="white" size={20} />
-                        <Text className="text-white font-bold ml-2">Back</Text>
+            <View style={{ flex: 1 }}>
+                <LinearGradient colors={["#f59e0b", "#d97706"]} style={styles.headerGrad}>
+                    <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
+                        <ArrowLeft color="white" size={18} />
+                        <Text style={styles.backText}>Back</Text>
                     </TouchableOpacity>
-                    <View>
-                        <Text className="text-white text-xl font-bold">Achievements</Text>
-                        <Text className="text-teal-200 text-xs">Your health milestones</Text>
-                    </View>
-                </View>
+                    <Text style={styles.headerTitle}>Achievements</Text>
+                    <Text style={styles.headerSub}>Your health milestones</Text>
+                </LinearGradient>
 
-                <ScrollView contentContainerStyle={{ padding: 16 }}>
+                <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
                     {/* Stats Summary */}
-                    <Card className="mb-6 bg-white/10 backdrop-blur-md border-white/20">
-                        <CardContent className="flex-row justify-around py-4">
-                            <View className="items-center">
-                                <Text className="text-3xl font-bold text-white">{badges.filter(b => b.isUnlocked).length}</Text>
-                                <Text className="text-teal-100 text-xs">Unlocked</Text>
-                            </View>
-                            <View className="items-center">
-                                <Text className="text-3xl font-bold text-white">{badges.length}</Text>
-                                <Text className="text-teal-100 text-xs">Total Available</Text>
-                            </View>
-                        </CardContent>
-                    </Card>
+                    <View style={styles.statsCard}>
+                        <View style={styles.statCol}>
+                            <Text style={styles.statValue}>{unlockedCount}</Text>
+                            <Text style={styles.statLabel}>Unlocked</Text>
+                        </View>
+                        <View style={styles.statDivider} />
+                        <View style={styles.statCol}>
+                            <Text style={styles.statValue}>{totalCount}</Text>
+                            <Text style={styles.statLabel}>Total Available</Text>
+                        </View>
+                    </View>
 
                     {/* Badges Grid */}
-                    <View className="flex-row flex-wrap justify-between">
+                    <View style={styles.grid}>
                         {badges.map((badge) => (
-                            <View key={badge.id} className="w-[48%] mb-4">
-                                <Card className={`h-40 ${badge.isUnlocked ? 'bg-white/95' : 'bg-white/50 border-white/10'}`}>
-                                    <CardContent className="h-full items-center justify-center p-3 text-center">
-                                        <View className={`w-14 h-14 rounded-full items-center justify-center mb-2 ${badge.isUnlocked ? 'bg-amber-100' : 'bg-slate-200'}`}>
-                                            {badge.isUnlocked ? (
-                                                <Text className="text-2xl">{badge.icon}</Text>
-                                            ) : (
-                                                <Lock size={20} color="#94a3b8" />
-                                            )}
-                                        </View>
-                                        <Text className={`font-bold text-sm mb-1 ${badge.isUnlocked ? 'text-slate-800' : 'text-slate-500'}`}>
-                                            {badge.name}
-                                        </Text>
-                                        <Text className="text-xs text-slate-400 text-center" numberOfLines={2}>
-                                            {badge.description}
-                                        </Text>
-                                    </CardContent>
-                                </Card>
+                            <View key={badge.id} style={styles.gridItem}>
+                                <View style={[styles.badgeCard, !badge.isUnlocked && styles.badgeLocked]}>
+                                    <View style={[styles.iconWrap, badge.isUnlocked ? { backgroundColor: '#fffbeb' } : { backgroundColor: '#f1f5f9' }]}>
+                                        {badge.isUnlocked ? (
+                                            <Text style={styles.badgeEmoji}>{badge.icon}</Text>
+                                        ) : (
+                                            <Lock size={20} color="#94a3b8" />
+                                        )}
+                                    </View>
+                                    <Text style={[styles.badgeName, !badge.isUnlocked && { color: '#64748b' }]}>
+                                        {badge.name}
+                                    </Text>
+                                    <Text style={styles.badgeDesc} numberOfLines={2}>
+                                        {badge.description}
+                                    </Text>
+                                </View>
                             </View>
                         ))}
                     </View>
@@ -88,3 +79,25 @@ export default function AchievementsScreen({ navigation }: any) {
         </ScreenLayout>
     );
 }
+
+const styles = StyleSheet.create({
+    headerGrad: { paddingHorizontal: 20, paddingTop: 10, paddingBottom: 28 },
+    backBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(255,255,255,0.2)', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, alignSelf: 'flex-start', marginBottom: 16 },
+    backText: { color: '#fff', fontWeight: '700' },
+    headerTitle: { fontSize: 24, fontWeight: '800', color: '#fff' },
+    headerSub: { fontSize: 13, color: 'rgba(255,255,255,0.75)', marginTop: 4 },
+    scroll: { padding: 16, paddingBottom: 40 },
+    statsCard: { flexDirection: 'row', backgroundColor: '#fff', borderRadius: 20, padding: 20, marginBottom: 20, shadowColor: '#f59e0b', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.15, shadowRadius: 12, elevation: 4 },
+    statCol: { flex: 1, alignItems: 'center' },
+    statValue: { fontSize: 32, fontWeight: '800', color: '#d97706' },
+    statLabel: { fontSize: 13, color: '#9ca3af', marginTop: 4, fontWeight: '600' },
+    statDivider: { width: 1, backgroundColor: '#f3f4f6' },
+    grid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' },
+    gridItem: { width: '48%', marginBottom: 16 },
+    badgeCard: { height: 150, backgroundColor: '#fff', borderRadius: 20, padding: 16, alignItems: 'center', justifyContent: 'center', shadowColor: '#f59e0b', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.08, shadowRadius: 10, elevation: 3, borderWidth: 1, borderColor: '#fef3c7' },
+    badgeLocked: { backgroundColor: '#f8fafc', shadowOpacity: 0, elevation: 0, borderColor: '#f1f5f9' },
+    iconWrap: { width: 56, height: 56, borderRadius: 28, alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
+    badgeEmoji: { fontSize: 28 },
+    badgeName: { fontSize: 14, fontWeight: '700', color: '#1e1b4b', textAlign: 'center', marginBottom: 4 },
+    badgeDesc: { fontSize: 11, color: '#9ca3af', textAlign: 'center', lineHeight: 16 },
+});

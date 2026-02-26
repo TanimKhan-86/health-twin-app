@@ -1,10 +1,14 @@
 import React, { useState } from "react";
-import { View, Text, TouchableOpacity, Image, Alert, Keyboard, TouchableWithoutFeedback, Platform } from "react-native";
+import {
+    View, Text, TouchableOpacity, Alert,
+    Keyboard, TouchableWithoutFeedback, Platform,
+    StyleSheet, ActivityIndicator
+} from "react-native";
 import { ScreenLayout } from "../../components/ScreenLayout";
-import { Input } from "../../components/ui/Input";
-import { Button } from "../../components/ui/Button";
 import { CircuitBoard } from "lucide-react-native";
 import { useAuth } from "../../contexts/AuthContext";
+import { LinearGradient } from "expo-linear-gradient";
+import { TextInput } from "react-native";
 
 export default function SignInScreen({ navigation }: any) {
     const { login } = useAuth();
@@ -14,22 +18,19 @@ export default function SignInScreen({ navigation }: any) {
 
     const handleLogin = async () => {
         if (!email || !password) {
-            Alert.alert("Error", "Please enter both email and password.");
+            if (Platform.OS === 'web') alert("Please enter both email and password.");
+            else Alert.alert("Error", "Please enter both email and password.");
             return;
         }
-
         setIsLoading(true);
         try {
-            // Call AuthContext → backend → MongoDB
             const user = await login(email, password);
             if (!user) {
                 const msg = "Invalid email or password.";
                 if (Platform.OS === 'web') alert(msg);
                 else Alert.alert("Invalid Credentials", msg);
             }
-            // Auth gate in App.tsx auto-navigates to Main — no navigation.replace needed!
-        } catch (error) {
-            console.error(error);
+        } catch {
             const msg = "Something went wrong. Please try again.";
             if (Platform.OS === 'web') alert(msg);
             else Alert.alert("Error", msg);
@@ -39,72 +40,71 @@ export default function SignInScreen({ navigation }: any) {
     };
 
     const content = (
-        <View className="flex-1 justify-center p-6">
-            <View className="mb-10 items-center">
-                {/* Logo Area */}
-                <View className="h-24 w-24 items-center justify-center rounded-3xl bg-brand-primary shadow-xl shadow-brand-primary/30 mb-6">
-                    <CircuitBoard size={48} color="#ffffff" />
+        <View style={styles.container}>
+            {/* Logo */}
+            <View style={styles.logoSection}>
+                <View style={styles.logoWrap}>
+                    <CircuitBoard size={36} color="#ffffff" />
                 </View>
-                <Text className="text-3xl font-bold text-slate-900 dark:text-white">HealthTwin AI</Text>
-                <Text className="mt-2 text-brand-primary font-medium">Your Digital Health Companion</Text>
+                <Text style={styles.appName}>HealthTwin AI</Text>
+                <Text style={styles.tagline}>Your Digital Health Companion</Text>
             </View>
 
-            <View className="w-full bg-white/80 dark:bg-slate-800/80 p-6 rounded-3xl shadow-lg shadow-purple-100 dark:shadow-none border border-white dark:border-slate-700">
-                <View className="mb-6">
-                    <Text className="text-2xl font-bold text-center text-slate-800 dark:text-slate-100">Welcome Back</Text>
+            {/* Card */}
+            <View style={styles.card}>
+                <Text style={styles.cardTitle}>Welcome Back</Text>
+                <Text style={styles.cardSubtitle}>Sign in to your account</Text>
+
+                <TextInput
+                    style={styles.input}
+                    placeholder="Email"
+                    placeholderTextColor="#a78bfa"
+                    value={email}
+                    onChangeText={setEmail}
+                    autoCapitalize="none"
+                    keyboardType="email-address"
+                />
+                <TextInput
+                    style={styles.input}
+                    placeholder="Password"
+                    placeholderTextColor="#a78bfa"
+                    value={password}
+                    onChangeText={setPassword}
+                    secureTextEntry
+                />
+
+                <TouchableOpacity style={styles.forgotWrap}>
+                    <Text style={styles.forgotText}>Forgot Password?</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity onPress={handleLogin} disabled={isLoading} activeOpacity={0.85}>
+                    <LinearGradient
+                        colors={["#7c3aed", "#6d28d9"]}
+                        start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+                        style={styles.primaryBtn}
+                    >
+                        {isLoading
+                            ? <ActivityIndicator color="#fff" />
+                            : <Text style={styles.primaryBtnText}>Sign In</Text>
+                        }
+                    </LinearGradient>
+                </TouchableOpacity>
+
+                <View style={styles.dividerRow}>
+                    <View style={styles.divLine} />
+                    <Text style={styles.divText}>Or continue with</Text>
+                    <View style={styles.divLine} />
                 </View>
 
-                <View className="space-y-4">
-                    <Input
-                        placeholder="Email"
-                        value={email}
-                        onChangeText={setEmail}
-                        autoCapitalize="none"
-                        keyboardType="email-address"
-                        className="bg-purple-50/50 dark:bg-slate-900/50 border-purple-100 dark:border-slate-700 text-slate-800 dark:text-slate-100"
-                        placeholderTextColor="#94a3b8"
-                    />
-                    <Input
-                        placeholder="Password"
-                        value={password}
-                        onChangeText={setPassword}
-                        secureTextEntry
-                        className="bg-purple-50/50 dark:bg-slate-900/50 border-purple-100 dark:border-slate-700 text-slate-800 dark:text-slate-100"
-                        placeholderTextColor="#94a3b8"
-                    />
-                    <TouchableOpacity onPress={() => console.log("Forgot password")}>
-                        <Text className="text-right text-sm text-brand-primary font-medium">
-                            Forgot Password?
-                        </Text>
-                    </TouchableOpacity>
-                </View>
-
-                <View className="mt-8 space-y-4">
-                    <Button
-                        label={isLoading ? "Signing in..." : "Sign In"}
-                        onPress={handleLogin}
-                        disabled={isLoading}
-                        className="w-full bg-brand-primary shadow-lg shadow-brand-primary/25 rounded-xl h-14"
-                        labelClasses="text-lg font-semibold"
-                    />
-
-                    <View className="flex-row items-center space-x-2 my-2">
-                        <View className="h-px flex-1 bg-slate-200 dark:bg-slate-700" />
-                        <Text className="text-xs text-slate-400 font-medium">OR CONTINUE WITH</Text>
-                        <View className="h-px flex-1 bg-slate-200 dark:bg-slate-700" />
-                    </View>
-
-                    <View className="flex-row space-x-3 w-full justify-center">
-                        <Button variant="outline" className="flex-1 border-slate-200 dark:border-slate-700" label="Google" labelClasses="text-slate-600 dark:text-slate-300" />
-                        <Button variant="outline" className="flex-1 border-slate-200 dark:border-slate-700" label="Apple" labelClasses="text-slate-600 dark:text-slate-300" />
-                    </View>
-                </View>
+                <TouchableOpacity style={styles.googleBtn}>
+                    <Text style={styles.googleBtnText}>🌐  Continue with Google</Text>
+                </TouchableOpacity>
             </View>
 
-            <View className="mt-8 flex-row justify-center space-x-1">
-                <Text className="text-slate-500 dark:text-slate-400">Don't have an account?</Text>
+            <View style={styles.bottomRow}>
+                <Text style={styles.bottomText}>Don't have an account? </Text>
                 <TouchableOpacity onPress={() => navigation.navigate("SignUp")}>
-                    <Text className="font-bold text-brand-primary">Sign Up</Text>
+                    <Text style={styles.bottomLink}>Sign Up</Text>
                 </TouchableOpacity>
             </View>
         </View>
@@ -112,13 +112,74 @@ export default function SignInScreen({ navigation }: any) {
 
     return (
         <ScreenLayout gradientBackground>
-            {Platform.OS === 'web' ? (
-                content
-            ) : (
-                <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-                    {content}
-                </TouchableWithoutFeedback>
+            {Platform.OS === 'web' ? content : (
+                <TouchableWithoutFeedback onPress={Keyboard.dismiss}>{content}</TouchableWithoutFeedback>
             )}
         </ScreenLayout>
     );
 }
+
+const styles = StyleSheet.create({
+    container: { flex: 1, justifyContent: 'center', paddingHorizontal: 24 },
+    logoSection: { alignItems: 'center', marginBottom: 32 },
+    logoWrap: {
+        width: 80, height: 80, borderRadius: 24,
+        backgroundColor: '#7c3aed',
+        alignItems: 'center', justifyContent: 'center',
+        shadowColor: '#7c3aed', shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: 0.45, shadowRadius: 16, elevation: 12,
+        marginBottom: 16,
+    },
+    appName: { fontSize: 26, fontWeight: '800', color: '#3b0764', letterSpacing: 0.3 },
+    tagline: { fontSize: 14, color: '#7c3aed', fontWeight: '500', marginTop: 4 },
+
+    card: {
+        backgroundColor: '#ffffff',
+        borderRadius: 28,
+        padding: 28,
+        shadowColor: '#7c3aed',
+        shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: 0.12,
+        shadowRadius: 24,
+        elevation: 8,
+    },
+    cardTitle: { fontSize: 22, fontWeight: '800', color: '#1e1b4b', textAlign: 'center' },
+    cardSubtitle: { fontSize: 13, color: '#7c3aed', textAlign: 'center', marginTop: 4, marginBottom: 24 },
+
+    input: {
+        backgroundColor: '#f5f3ff',
+        borderRadius: 14,
+        borderWidth: 1.5,
+        borderColor: '#e9d5ff',
+        paddingHorizontal: 16,
+        paddingVertical: 14,
+        fontSize: 15,
+        color: '#1e1b4b',
+        marginBottom: 12,
+    },
+    forgotWrap: { alignItems: 'flex-end', marginBottom: 20 },
+    forgotText: { color: '#7c3aed', fontSize: 13, fontWeight: '600' },
+
+    primaryBtn: {
+        borderRadius: 16, paddingVertical: 16,
+        alignItems: 'center', justifyContent: 'center',
+        shadowColor: '#6d28d9', shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.35, shadowRadius: 12, elevation: 6,
+    },
+    primaryBtnText: { color: '#ffffff', fontSize: 16, fontWeight: '700', letterSpacing: 0.3 },
+
+    dividerRow: { flexDirection: 'row', alignItems: 'center', marginVertical: 20 },
+    divLine: { flex: 1, height: 1, backgroundColor: '#e9d5ff' },
+    divText: { marginHorizontal: 12, color: '#a78bfa', fontSize: 12, fontWeight: '600' },
+
+    googleBtn: {
+        borderWidth: 1.5, borderColor: '#e9d5ff',
+        borderRadius: 14, paddingVertical: 14,
+        alignItems: 'center',
+    },
+    googleBtnText: { color: '#4c1d95', fontSize: 15, fontWeight: '600' },
+
+    bottomRow: { flexDirection: 'row', justifyContent: 'center', marginTop: 28 },
+    bottomText: { color: '#5b21b6', fontSize: 14 },
+    bottomLink: { color: '#7c3aed', fontWeight: '800', fontSize: 14 },
+});
