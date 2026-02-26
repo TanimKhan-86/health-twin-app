@@ -227,6 +227,22 @@ export default function DashboardScreen({ navigation }: any) {
                             </View>
                         </View>
                     </TouchableOpacity>
+
+                    <TouchableOpacity
+                        className="bg-gradient-to-r from-teal-600/20 to-purple-600/20 p-4 rounded-xl flex-row items-center justify-between shadow-sm border border-teal-500/30"
+                        onPress={() => navigation.navigate("AIWeeklyAnalysis")}
+                        style={{ backgroundColor: 'rgba(13, 148, 136, 0.15)', borderWidth: 1, borderColor: 'rgba(13, 148, 136, 0.4)' }}
+                    >
+                        <View className="flex-row items-center space-x-3">
+                            <View style={{ backgroundColor: 'rgba(13, 148, 136, 0.2)', padding: 8, borderRadius: 20 }}>
+                                <Activity size={20} color="#0d9488" />
+                            </View>
+                            <View>
+                                <Text className="font-bold text-teal-700 dark:text-teal-300">🤖 Your Weekly Analysis</Text>
+                                <Text className="text-slate-500 dark:text-slate-400 text-xs">Powered by Gemini AI ✨</Text>
+                            </View>
+                        </View>
+                    </TouchableOpacity>
                 </View>
             </ScrollView>
         </ScreenLayout>

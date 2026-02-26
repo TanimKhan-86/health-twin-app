@@ -8,6 +8,7 @@ import moodRoutes from './routes/mood';
 import analyticsRoutes from './routes/analytics';
 import achievementsRoutes from './routes/achievements';
 import seedRoutes from './routes/seed';
+import aiRoutes from './routes/ai';
 
 dotenv.config();
 
@@ -28,6 +29,7 @@ app.use('/api/mood', moodRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/achievements', achievementsRoutes);
 app.use('/api/seed', seedRoutes);
+app.use('/api/ai', aiRoutes);
 
 // Health check
 app.get('/', (_req, res) => {

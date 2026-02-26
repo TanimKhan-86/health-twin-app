@@ -19,6 +19,7 @@ import DataEntryScreen from './screens/main/DataEntryScreen';
 import WhatIfScreen from './screens/main/WhatIfScreen';
 import AchievementsScreen from './screens/main/AchievementsScreen';
 import WeeklySummaryScreen from './screens/main/WeeklySummaryScreen';
+import AIWeeklyAnalysisScreen from './screens/main/AIWeeklyAnalysisScreen';
 import AnalyticsScreen from './screens/main/AnalyticsScreen';
 import SettingsScreen from './screens/profile/SettingsScreen';
 import DatabaseViewerScreen from './screens/dev/DatabaseViewerScreen';
@@ -47,6 +48,7 @@ function AppNavigator() {
       <Stack.Screen name="WhatIf" component={WhatIfScreen} />
       <Stack.Screen name="Achievements" component={AchievementsScreen} />
       <Stack.Screen name="WeeklySummary" component={WeeklySummaryScreen} />
+      <Stack.Screen name="AIWeeklyAnalysis" component={AIWeeklyAnalysisScreen} />
       <Stack.Screen name="Analytics" component={AnalyticsScreen} />
       <Stack.Screen name="Settings" component={SettingsScreen} />
       <Stack.Screen name="DatabaseViewer" component={DatabaseViewerScreen} />
