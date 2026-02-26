@@ -17,10 +17,49 @@ router.get('/', async (req: AuthRequest, res: Response): Promise<void> => {
             date: { $gte: since },
         }).sort({ date: -1 });
 
-        res.json(entries);
+        res.json({ success: true, data: entries });
     } catch (err) {
         console.error(err);
-        res.status(500).json({ error: 'Server error' });
+        res.status(500).json({ success: false, error: 'Server error' });
+    }
+});
+
+// GET /api/mood/today
+router.get('/today', async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const start = new Date();
+        start.setHours(0, 0, 0, 0);
+        const end = new Date();
+        end.setHours(23, 59, 59, 999);
+
+        const entry = await MoodEntry.findOne({
+            userId: req.userId,
+            date: { $gte: start, $lte: end },
+        }).sort({ createdAt: -1 });
+
+        res.json({ success: true, data: entry ?? null });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ success: false, error: 'Server error' });
+    }
+});
+
+// GET /api/mood/history?limit=7
+router.get('/history', async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const limit = parseInt(req.query.limit as string) || 30;
+        const since = new Date();
+        since.setDate(since.getDate() - limit);
+
+        const entries = await MoodEntry.find({
+            userId: req.userId,
+            date: { $gte: since },
+        }).sort({ date: -1 });
+
+        res.json({ success: true, data: entries });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ success: false, error: 'Server error' });
     }
 });
 
@@ -33,10 +72,10 @@ router.post('/', async (req: AuthRequest, res: Response): Promise<void> => {
             date: date ? new Date(date) : new Date(),
             mood, energyLevel, stressLevel, notes,
         });
-        res.status(201).json(entry);
+        res.status(201).json({ success: true, data: entry });
     } catch (err) {
         console.error(err);
-        res.status(500).json({ error: 'Server error' });
+        res.status(500).json({ success: false, error: 'Server error' });
     }
 });
 
@@ -48,11 +87,11 @@ router.put('/:id', async (req: AuthRequest, res: Response): Promise<void> => {
             req.body,
             { new: true, runValidators: true }
         );
-        if (!entry) { res.status(404).json({ error: 'Entry not found' }); return; }
-        res.json(entry);
+        if (!entry) { res.status(404).json({ success: false, error: 'Entry not found' }); return; }
+        res.json({ success: true, data: entry });
     } catch (err) {
         console.error(err);
-        res.status(500).json({ error: 'Server error' });
+        res.status(500).json({ success: false, error: 'Server error' });
     }
 });
 
@@ -60,11 +99,11 @@ router.put('/:id', async (req: AuthRequest, res: Response): Promise<void> => {
 router.delete('/:id', async (req: AuthRequest, res: Response): Promise<void> => {
     try {
         const entry = await MoodEntry.findOneAndDelete({ _id: req.params.id, userId: req.userId });
-        if (!entry) { res.status(404).json({ error: 'Entry not found' }); return; }
-        res.json({ message: 'Deleted' });
+        if (!entry) { res.status(404).json({ success: false, error: 'Entry not found' }); return; }
+        res.json({ success: true, data: { message: 'Deleted' } });
     } catch (err) {
         console.error(err);
-        res.status(500).json({ error: 'Server error' });
+        res.status(500).json({ success: false, error: 'Server error' });
     }
 });
 
