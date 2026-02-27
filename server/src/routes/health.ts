@@ -91,6 +91,7 @@ router.post('/seed-demo', async (req: AuthRequest, res: Response): Promise<void>
                 sleepHours: +(5 + Math.random() * 4).toFixed(1),
                 waterLitres: +(1.5 + Math.random() * 1.5).toFixed(1),
                 heartRate: 60 + Math.floor(Math.random() * 30),
+                energyScore: 40 + Math.floor(Math.random() * 60), // 40–99
                 weight: +(70 + Math.random() * 5).toFixed(1),
                 notes: `Demo entry day ${7 - i}`,
             });
@@ -127,11 +128,11 @@ router.post('/seed-demo', async (req: AuthRequest, res: Response): Promise<void>
 // POST /api/health — create a new entry
 router.post('/', async (req: AuthRequest, res: Response): Promise<void> => {
     try {
-        const { date, steps, sleepHours, waterLitres, heartRate, weight, notes } = req.body;
+        const { date, steps, sleepHours, waterLitres, heartRate, energyScore, weight, notes } = req.body;
         const entry = await HealthEntry.create({
             userId: req.userId,
             date: date ? new Date(date) : new Date(),
-            steps, sleepHours, waterLitres, heartRate, weight, notes,
+            steps, sleepHours, waterLitres, heartRate, energyScore, weight, notes,
         });
         res.status(201).json({ success: true, data: entry });
     } catch (err) {

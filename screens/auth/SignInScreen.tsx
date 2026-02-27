@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import {
-    View, Text, TouchableOpacity, Alert,
+    View, Text, TouchableOpacity,
     Keyboard, TouchableWithoutFeedback, Platform,
     StyleSheet, ActivityIndicator
 } from "react-native";
@@ -15,25 +15,24 @@ export default function SignInScreen({ navigation }: any) {
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
     const [isLoading, setIsLoading] = useState(false);
+    const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
     const handleLogin = async () => {
+        setErrorMsg(null);
         if (!email || !password) {
-            if (Platform.OS === 'web') alert("Please enter both email and password.");
-            else Alert.alert("Error", "Please enter both email and password.");
+            setErrorMsg("Please enter both email and password.");
             return;
         }
         setIsLoading(true);
         try {
-            const user = await login(email, password);
+            const cleanEmail = email.trim().toLowerCase();
+            const cleanPassword = password.trim();
+            const user = await login(cleanEmail, cleanPassword);
             if (!user) {
-                const msg = "Invalid email or password.";
-                if (Platform.OS === 'web') alert(msg);
-                else Alert.alert("Invalid Credentials", msg);
+                setErrorMsg("Invalid email or password.");
             }
         } catch {
-            const msg = "Something went wrong. Please try again.";
-            if (Platform.OS === 'web') alert(msg);
-            else Alert.alert("Error", msg);
+            setErrorMsg("Something went wrong. Please try again.");
         } finally {
             setIsLoading(false);
         }
@@ -54,6 +53,12 @@ export default function SignInScreen({ navigation }: any) {
             <View style={styles.card}>
                 <Text style={styles.cardTitle}>Welcome Back</Text>
                 <Text style={styles.cardSubtitle}>Sign in to your account</Text>
+
+                {errorMsg ? (
+                    <View style={styles.errorBox}>
+                        <Text style={styles.errorText}>{errorMsg}</Text>
+                    </View>
+                ) : null}
 
                 <TextInput
                     style={styles.input}
@@ -145,6 +150,9 @@ const styles = StyleSheet.create({
     },
     cardTitle: { fontSize: 22, fontWeight: '800', color: '#1e1b4b', textAlign: 'center' },
     cardSubtitle: { fontSize: 13, color: '#7c3aed', textAlign: 'center', marginTop: 4, marginBottom: 24 },
+
+    errorBox: { backgroundColor: '#fee2e2', padding: 12, borderRadius: 12, marginBottom: 16, borderWidth: 1, borderColor: '#fca5a5' },
+    errorText: { color: '#dc2626', fontSize: 14, textAlign: 'center', fontWeight: '500' },
 
     input: {
         backgroundColor: '#f5f3ff',

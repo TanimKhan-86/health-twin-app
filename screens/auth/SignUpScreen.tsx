@@ -11,6 +11,7 @@ export default function SignUpScreen({ navigation }: any) {
     const { register } = useAuth();
     const [step, setStep] = useState(1);
     const [isLoading, setIsLoading] = useState(false);
+    const [errorMsg, setErrorMsg] = useState<string | null>(null);
     const [formData, setFormData] = useState({
         firstName: "",
         lastName: "",
@@ -24,17 +25,18 @@ export default function SignUpScreen({ navigation }: any) {
     });
 
     const handleNext = () => {
+        setErrorMsg(null);
         if (step === 1) {
             if (!formData.firstName || !formData.email || !formData.password) {
-                Alert.alert("Missing Fields", "Please fill in all required fields.");
+                setErrorMsg("Please fill in all required fields.");
                 return;
             }
             if (formData.password.length < 8) {
-                Alert.alert("Password Too Short", "Password must be at least 8 characters long.");
+                setErrorMsg("Password must be at least 8 characters long.");
                 return;
             }
             if (formData.password !== formData.confirmPassword) {
-                Alert.alert("Password Mismatch", "Passwords do not match.");
+                setErrorMsg("Passwords do not match.");
                 return;
             }
         }
@@ -64,6 +66,8 @@ export default function SignUpScreen({ navigation }: any) {
             const dataUri = asset.base64
                 ? `data:image/jpeg;base64,${asset.base64}`
                 : asset.uri; // fallback on platforms that don't return base64
+
+            console.log(`[SignUpScreen] Image Picked! Base64 present? ${!!asset.base64}. dataUri length:`, dataUri?.length, `Starts with:`, dataUri?.substring(0, 30));
             setFormData({ ...formData, profileImage: dataUri });
         }
     };
@@ -71,6 +75,7 @@ export default function SignUpScreen({ navigation }: any) {
 
     const handleSignup = async () => {
         setIsLoading(true);
+        setErrorMsg(null);
         try {
             const fullName = `${formData.firstName} ${formData.lastName}`.trim();
 
@@ -86,9 +91,7 @@ export default function SignUpScreen({ navigation }: any) {
             const user = await register(fullName, formData.email, formData.password, profile);
 
             if (!user) {
-                const msg = "Failed to create account. Email might already be in use.";
-                if (Platform.OS === 'web') alert(msg);
-                else Alert.alert("Error", msg);
+                setErrorMsg("Failed to create account. Email might already be in use.");
                 return;
             }
 
@@ -96,9 +99,7 @@ export default function SignUpScreen({ navigation }: any) {
             // Auth gate in App.tsx auto-navigates to Main
         } catch (error) {
             console.error(error);
-            const msg = "Something went wrong. Please try again.";
-            if (Platform.OS === 'web') alert(msg);
-            else Alert.alert("Error", msg);
+            setErrorMsg("Something went wrong. Please try again.");
         } finally {
             setIsLoading(false);
         }
@@ -157,6 +158,12 @@ export default function SignUpScreen({ navigation }: any) {
 
             {/* Form Content */}
             <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 40 }} keyboardDismissMode="on-drag" keyboardShouldPersistTaps="handled">
+                {errorMsg ? (
+                    <View className="bg-red-100 p-3 rounded-xl mb-4 border border-red-300 mx-4">
+                        <Text className="text-red-700 text-center font-medium">{errorMsg}</Text>
+                    </View>
+                ) : null}
+
                 {step === 1 && (
                     <View className="space-y-4">
                         <View className="flex-row space-x-4">

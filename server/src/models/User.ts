@@ -5,6 +5,10 @@ export interface IUser extends Document {
     name: string;
     email: string;
     password: string;
+    profileImage?: string;
+    age?: number;
+    heightCm?: number;
+    weightKg?: number;
     createdAt: Date;
     comparePassword(candidate: string): Promise<boolean>;
 }
@@ -14,6 +18,10 @@ const UserSchema = new Schema<IUser>(
         name: { type: String, required: true, trim: true },
         email: { type: String, required: true, unique: true, lowercase: true, trim: true },
         password: { type: String, required: true, minlength: 6 },
+        profileImage: { type: String },
+        age: { type: Number },
+        heightCm: { type: Number },
+        weightKg: { type: Number }
     },
     { timestamps: true }
 );
@@ -27,6 +35,7 @@ UserSchema.pre('save', async function (next) {
 
 // Compare password
 UserSchema.methods.comparePassword = function (candidate: string): Promise<boolean> {
+    console.log(`[comparePassword] Validating string length: ${candidate?.length}, raw: '${candidate}'`);
     return bcrypt.compare(candidate, this.password);
 };
 

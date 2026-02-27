@@ -32,9 +32,15 @@ export default function SettingsScreen({ navigation }: any) {
     const initials = user?.name ? user.name.split(' ').map((n: string) => n[0]).join('').toUpperCase().slice(0, 2) : '?';
 
     const handleLogout = () => {
-        const doLogout = () => logout();
-        if (Platform.OS === 'web') { if (window.confirm('Sign out?')) doLogout(); }
-        else Alert.alert('Sign Out', 'Are you sure?', [{ text: 'Cancel', style: 'cancel' }, { text: 'Sign Out', style: 'destructive', onPress: doLogout }]);
+        if (Platform.OS === 'web') {
+            // Bypass window.confirm on Chrome which flashes and disappears
+            logout();
+        } else {
+            Alert.alert('Sign Out', 'Are you sure?', [
+                { text: 'Cancel', style: 'cancel' },
+                { text: 'Sign Out', style: 'destructive', onPress: () => logout() }
+            ]);
+        }
     };
 
     const handleSeedDemo = async () => {
@@ -96,6 +102,10 @@ export default function SettingsScreen({ navigation }: any) {
 
                 <Text style={styles.sectionLabel}>DATA & DEMO</Text>
                 <View style={styles.section}>
+                    <SettingRow icon={<User size={18} color="#0ea5e9" />} iconBg="#e0f2fe"
+                        label="Digital Twin Setup" sub="Create your NanoBana avatar"
+                        onPress={() => navigation.navigate("AvatarSetup")} />
+                    <View style={styles.divider} />
                     <SettingRow icon={<Database size={18} color="#10b981" />} iconBg="#ecfdf5"
                         label={isSeeding ? "Seeding..." : "Seed 7 Days Demo"} sub="Populate with sample health data"
                         onPress={isSeeding ? undefined : handleSeedDemo} />

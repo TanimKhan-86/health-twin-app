@@ -7,6 +7,7 @@ export interface IHealthEntry extends Document {
     sleepHours: number;
     waterLitres: number;
     heartRate: number;
+    energyScore?: number;
     weight?: number;
     notes?: string;
     createdAt: Date;
@@ -20,6 +21,7 @@ const HealthEntrySchema = new Schema<IHealthEntry>(
         sleepHours: { type: Number, default: 0, min: 0, max: 24 },
         waterLitres: { type: Number, default: 0, min: 0 },
         heartRate: { type: Number, default: 0, min: 0 },
+        energyScore: { type: Number, default: null, min: 0, max: 100 },
         weight: { type: Number, min: 0 },
         notes: { type: String, trim: true },
     },

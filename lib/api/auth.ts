@@ -6,7 +6,8 @@
 import { apiFetch } from './client';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const TOKEN_KEY = 'AUTH_TOKEN';
+// Use the same key as client.ts — keeping them in sync prevents session loss
+const TOKEN_KEY = 'auth_token';
 
 // ─── Token Helpers (re-exported for AuthContext) ──────────────────────────────
 export async function getToken(): Promise<string | null> {
@@ -65,9 +66,10 @@ export interface HealthEntryData {
     date?: string;        // YYYY-MM-DD, defaults to today
     steps?: number;
     sleepHours?: number;
-    energyScore?: number;
+    energyScore?: number; // 0–100
     heartRate?: number;
-    hydrationLiters?: number;
+    waterLitres?: number; // was hydrationLiters — now matches the DB field
+    weight?: number;
     notes?: string;
 }
 

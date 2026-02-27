@@ -22,6 +22,7 @@ import WeeklySummaryScreen from './screens/main/WeeklySummaryScreen';
 import AIWeeklyAnalysisScreen from './screens/main/AIWeeklyAnalysisScreen';
 import AnalyticsScreen from './screens/main/AnalyticsScreen';
 import SettingsScreen from './screens/profile/SettingsScreen';
+import AvatarSetupScreen from './screens/profile/AvatarSetupScreen';
 import DatabaseViewerScreen from './screens/dev/DatabaseViewerScreen';
 import { ToastProvider } from './components/ui/Toast';
 import { ActivityIndicator, View, Text } from 'react-native';
@@ -51,6 +52,7 @@ function AppNavigator() {
       <Stack.Screen name="AIWeeklyAnalysis" component={AIWeeklyAnalysisScreen} />
       <Stack.Screen name="Analytics" component={AnalyticsScreen} />
       <Stack.Screen name="Settings" component={SettingsScreen} />
+      <Stack.Screen name="AvatarSetup" component={AvatarSetupScreen} />
       <Stack.Screen name="DatabaseViewer" component={DatabaseViewerScreen} />
     </Stack.Navigator>
   );

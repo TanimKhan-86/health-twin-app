@@ -98,26 +98,49 @@ export function AuthProvider({ children }: AuthProviderProps) {
             method: 'POST',
             body: JSON.stringify({ name, email, password, ...profile }),
         });
+
+        console.log('[AuthContext] Raw Register Response:', JSON.stringify(res));
+
         if (res.success && res.data) {
             await persistSession(res.data.token, res.data.user);
             return res.data.user;
         }
-        console.error('[Auth] Register failed:', res.error, res.details);
+
+        // Sometimes the backend sends token at root level due to client.ts spread
+        const rawRes = res as any;
+        if (res.success && rawRes.token && rawRes.user) {
+            await persistSession(rawRes.token, rawRes.user);
+            return rawRes.user;
+        }
+
+        console.error('[AuthContext] Register failed. Success:', res.success, 'Error:', res.error);
         return null;
     };
 
 
     // ─── Login ──────────────────────────────────────────────────────────────────
     const login = async (email: string, password: string): Promise<AuthUser | null> => {
+        console.log(`[AuthContext] Sending Login... Email: '${email}'`);
         const res = await apiFetch<{ token: string; user: AuthUser }>('/api/auth/login', {
             method: 'POST',
             body: JSON.stringify({ email, password }),
         });
+
+        console.log('[AuthContext] Raw Login Response:', JSON.stringify(res));
+
         if (res.success && res.data) {
             await persistSession(res.data.token, res.data.user);
             return res.data.user;
         }
-        console.error('[Auth] Login failed:', res.error);
+
+        // Fallback for flat structure
+        const rawRes = res as any;
+        if (res.success && rawRes.token && rawRes.user) {
+            await persistSession(rawRes.token, rawRes.user);
+            return rawRes.user;
+        }
+
+        console.error('[AuthContext] Login failed. Success:', res.success, 'Error:', res.error);
         return null;
     };
 
@@ -158,12 +181,28 @@ export function AuthProvider({ children }: AuthProviderProps) {
     );
 }
 
-// ─── JWT Helpers (client-side decode – no library needed) ─────────────────────
+// ─── JWT Helpers (client-side decode – works in React Native without atob) ──────
 function decodeJwt(token: string): { userId: string; exp: number } | null {
     try {
-        const payload = token.split('.')[1];
-        const decoded = JSON.parse(atob(payload));
-        return decoded;
+        const base64Url = token.split('.')[1];
+        // Pad base64 to a multiple of 4 chars, replace URL-safe chars
+        const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+        const pad = base64.length % 4;
+        const padded = pad ? base64 + '='.repeat(4 - pad) : base64;
+
+        // Use Buffer in Node/RN, fall back to atob in browser
+        let jsonStr: string;
+        if (typeof Buffer !== 'undefined') {
+            jsonStr = Buffer.from(padded, 'base64').toString('utf8');
+        } else {
+            jsonStr = decodeURIComponent(
+                atob(padded)
+                    .split('')
+                    .map(c => '%' + c.charCodeAt(0).toString(16).padStart(2, '0'))
+                    .join('')
+            );
+        }
+        return JSON.parse(jsonStr);
     } catch {
         return null;
     }

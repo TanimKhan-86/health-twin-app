@@ -31,6 +31,7 @@ export default function DashboardScreen({ navigation }: any) {
     const { user } = useAuth();
     const [streak, setStreak] = useState(0);
     const [todayHealth, setTodayHealth] = useState<any>(null);
+    const [avatarKey, setAvatarKey] = useState("init");
 
     useFocusEffect(useCallback(() => { loadDashboard(); }, []));
 
@@ -39,6 +40,7 @@ export default function DashboardScreen({ navigation }: any) {
             const [streakData, health] = await Promise.all([getStreak(), getTodayHealth()]);
             setStreak(streakData?.currentStreak ?? 0);
             setTodayHealth(health);
+            setAvatarKey(Date.now().toString()); // Force avatar refresh
         } catch (e) { console.warn('Dashboard load error:', e); }
     };
 
@@ -72,7 +74,7 @@ export default function DashboardScreen({ navigation }: any) {
 
                 {/* Avatar Section */}
                 <View style={styles.avatarSection}>
-                    <DigitalTwinAvatar />
+                    <DigitalTwinAvatar key={avatarKey} />
                 </View>
 
                 {/* Metric Cards */}

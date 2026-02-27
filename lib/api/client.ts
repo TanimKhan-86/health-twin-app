@@ -59,13 +59,30 @@ export async function apiFetch<T = unknown>(
             headers,
         });
 
-        const json: ApiResponse<T> = await response.json();
-        return json;
-    } catch (error) {
-        console.error(`[API] ${path} failed:`, error);
+        let json: any;
+        try {
+            json = await response.json();
+        } catch {
+            return {
+                success: false,
+                error: `Server returned ${response.status}: ${response.statusText}`,
+            };
+        }
+
+        if (!response.ok) {
+            return {
+                success: false,
+                error: json?.error || `Error ${response.status}: ${response.statusText}`,
+                details: json?.details
+            }
+        }
+
+        return { success: true, data: json };
+    } catch (error: any) {
+        console.error(`[API] ${path} crsshed with:`, error?.message || error);
         return {
             success: false,
-            error: 'Network error – check your API URL and connection',
+            error: error?.message || 'Network error – check your API URL and connection',
         };
     }
 }
