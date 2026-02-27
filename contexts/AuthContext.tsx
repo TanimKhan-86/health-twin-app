@@ -55,28 +55,33 @@ export function AuthProvider({ children }: AuthProviderProps) {
                 const storedToken = await getToken();
                 if (!storedToken) return;
 
-                // Validate token is still good by calling health or a /me endpoint
-                // We decode the JWT payload to get user info (no extra endpoint needed)
+                // Validate token hasn't expired locally first
                 const payload = decodeJwt(storedToken);
                 if (!payload || isExpired(payload)) {
                     console.log('[Auth] Token expired, clearing session');
                     await removeToken();
-                    await AsyncStorage.multiRemove(['USER_ID', 'USER_NAME', 'USER_EMAIL', 'USER_PROFILE_IMAGE']);
+                    await AsyncStorage.multiRemove(['USER_ID', 'USER_NAME', 'USER_EMAIL']);
                     return;
                 }
 
-                // Restore user from AsyncStorage (cached on login/register)
-                const [id, name, email, profileImage] = await AsyncStorage.multiGet(
-                    ['USER_ID', 'USER_NAME', 'USER_EMAIL', 'USER_PROFILE_IMAGE']
-                ).then(entries => entries.map(([, v]) => v ?? ''));
-
-                if (id && name && email) {
-                    setUser({ id, name, email, profileImage: profileImage || undefined });
+                // Always fetch fresh user profile from server (avoids AsyncStorage
+                // failing silently on large base64 profileImage strings)
+                const res = await apiFetch<{ user: AuthUser }>('/api/auth/me');
+                if (res.success && res.data?.user) {
+                    const freshUser = res.data.user;
+                    setUser(freshUser);
                     setTokenState(storedToken);
-                    console.log(`[Auth] Session restored: ${name}`);
+                    // Cache lightweight fields only (not the large profileImage)
+                    await AsyncStorage.multiSet([
+                        ['USER_ID', freshUser.id],
+                        ['USER_NAME', freshUser.name],
+                        ['USER_EMAIL', freshUser.email],
+                    ]);
+                    console.log(`[Auth] Session restored via /me: ${freshUser.name}`);
                 } else {
-                    // Cached info missing, force re-login
+                    // Server rejected the token, clear everything
                     await removeToken();
+                    await AsyncStorage.multiRemove(['USER_ID', 'USER_NAME', 'USER_EMAIL']);
                 }
             } catch (e) {
                 console.warn('[Auth] Session restore error:', e);
@@ -156,12 +161,14 @@ export function AuthProvider({ children }: AuthProviderProps) {
     // ─── Helpers ─────────────────────────────────────────────────────────────────
     async function persistSession(jwtToken: string, authUser: AuthUser) {
         await setToken(jwtToken);
+        // Only cache lightweight fields — profileImage (base64) is too large for
+        // AsyncStorage and will silently fail. It is fetched fresh via /api/auth/me.
         await AsyncStorage.multiSet([
             ['USER_ID', authUser.id],
             ['USER_NAME', authUser.name],
             ['USER_EMAIL', authUser.email],
-            ['USER_PROFILE_IMAGE', authUser.profileImage ?? ''],
         ]);
+        // Set the full user object (including profileImage) in React state immediately
         setUser(authUser);
         setTokenState(jwtToken);
     }
