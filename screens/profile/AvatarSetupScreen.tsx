@@ -12,13 +12,19 @@ export default function AvatarSetupScreen({ navigation }: any) {
     const [photoUri, setPhotoUri] = useState<string | null>(null);
     const [loading, setLoading] = useState(false);
     const [success, setSuccess] = useState(false);
+    const [statusHint, setStatusHint] = useState<string | null>(null);
 
     // Check if user already has an avatar
     useEffect(() => {
-        apiFetch<{ hasAvatar: boolean; avatarUrl?: string }>('/api/avatar/status').then((res) => {
+        apiFetch<{ hasAvatar: boolean; avatarUrl?: string; ready?: boolean; generatedStates?: string[] }>('/api/avatar/status').then((res) => {
             if (res.success && res.data?.hasAvatar) {
                 setPhotoUri(res.data.avatarUrl ?? null);
-                setSuccess(true);
+                setSuccess(!!res.data.ready);
+                if (res.data.ready) {
+                    setStatusHint('Avatar is fully ready with all 4 emotional loops.');
+                } else {
+                    setStatusHint(`Avatar found. Generated states: ${(res.data.generatedStates || []).join(', ') || 'none'}`);
+                }
             }
         });
     }, []);
@@ -78,9 +84,10 @@ export default function AvatarSetupScreen({ navigation }: any) {
             }
             if (!res.ok || !data?.success) throw new Error(data?.error || `Avatar setup failed (${res.status})`);
 
-            showToast('Avatar generated! Animations are processing.', 'success');
+            showToast('Avatar created with 4 emotional loop animations.', 'success');
             setSuccess(true);
-            setTimeout(() => navigation.goBack(), 3000);
+            setStatusHint('Happy, sad, sleepy, and stressed animations are ready.');
+            setTimeout(() => navigation.goBack(), 1800);
 
         } catch (e: any) {
             showToast(e.message || 'Error generating avatar', 'error');
@@ -104,8 +111,9 @@ export default function AvatarSetupScreen({ navigation }: any) {
                 <View style={styles.content}>
                     <View style={styles.card}>
                         <Text style={styles.instructions}>
-                            Upload a clear photo of your face, and NanoBana will generate a dynamic, animated digital twin that reacts to your daily health data!
+                            Upload a clear photo of your face. NanoBana will create a stylized avatar plus 4 loop-ready emotional animations (happy, sad, sleepy, stressed).
                         </Text>
+                        {statusHint ? <Text style={styles.statusHint}>{statusHint}</Text> : null}
 
                         <TouchableOpacity onPress={handlePickImage} style={{ width: 200, height: 200, borderRadius: 100, backgroundColor: '#eff6ff', alignSelf: 'center', justifyContent: 'center', alignItems: 'center', overflow: 'hidden', borderWidth: 2, borderColor: '#bfdbfe', borderStyle: 'dashed', marginBottom: 24 }}>
                             {photoUri ? (
@@ -133,8 +141,8 @@ export default function AvatarSetupScreen({ navigation }: any) {
                         {loading && (
                             <View style={styles.loadingContainer}>
                                 <ActivityIndicator size="large" color="#3b82f6" />
-                                <Text style={styles.loadingText}>Synthesizing your Digital Twin...</Text>
-                                <Text style={styles.loadingSub}>This takes about 5 seconds</Text>
+                                <Text style={styles.loadingText}>Building your NanoBana avatar system...</Text>
+                                <Text style={styles.loadingSub}>Generating 4 high-quality loop animations</Text>
                             </View>
                         )}
 
@@ -142,7 +150,7 @@ export default function AvatarSetupScreen({ navigation }: any) {
                             <View style={styles.successContainer}>
                                 <CheckCircle size={48} color="#10b981" />
                                 <Text style={styles.successText}>Twin Activated!</Text>
-                                <Text style={styles.successSub}>Your profile and dashboard will now show your animated states.</Text>
+                                <Text style={styles.successSub}>Your dashboard can now auto-switch between happy, sad, sleepy, and stressed loops.</Text>
                             </View>
                         )}
                     </View>
@@ -161,6 +169,7 @@ const styles = StyleSheet.create({
     content: { padding: 16, flex: 1, marginTop: 10 },
     card: { backgroundColor: '#fff', borderRadius: 24, padding: 24, shadowColor: '#3b82f6', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.1, shadowRadius: 16, elevation: 4 },
     instructions: { fontSize: 15, color: '#4b5563', lineHeight: 22, textAlign: 'center', marginBottom: 24 },
+    statusHint: { fontSize: 12, color: '#1d4ed8', textAlign: 'center', marginBottom: 16, lineHeight: 18 },
     imagePicker: { width: 200, height: 200, borderRadius: 100, backgroundColor: '#eff6ff', alignSelf: 'center', justifyContent: 'center', alignItems: 'center', overflow: 'hidden', borderWidth: 2, borderColor: '#bfdbfe', borderStyle: 'dashed', marginBottom: 24 },
     previewImage: { width: '100%', height: '100%' },
     placeholder: { alignItems: 'center' },
