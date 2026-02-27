@@ -37,7 +37,20 @@ export default function AIWeeklyAnalysisScreen({ navigation }: any) {
                 method: 'POST', body: JSON.stringify({ healthData, moodData }),
             });
             if (!response.success || !response.data) throw new Error(response.error || 'Failed to get AI analysis');
-            setAnalysis(response.data);
+
+            const maybeNested: any = response.data as any;
+            const normalized: AIAnalysis = Array.isArray(maybeNested?.tips)
+                ? maybeNested
+                : maybeNested?.data;
+
+            if (!normalized || !Array.isArray(normalized.tips)) {
+                throw new Error('Analysis returned unexpected format');
+            }
+
+            setAnalysis({
+                ...normalized,
+                tips: normalized.tips.filter((tip) => typeof tip === 'string'),
+            });
         } catch (err: any) {
             setError(err?.message || 'Could not generate your analysis. Please check your connection and try again.');
         } finally { setLoading(false); }
@@ -113,12 +126,14 @@ export default function AIWeeklyAnalysisScreen({ navigation }: any) {
                                     </View>
                                     <Text style={styles.cardTitle}>3 Tips to Improve</Text>
                                 </View>
-                                {analysis.tips.map((tip, i) => (
+                                {analysis.tips.length > 0 ? analysis.tips.map((tip, i) => (
                                     <View key={i} style={styles.tipRow}>
                                         <View style={styles.tipBadge}><Text style={styles.tipNum}>{i + 1}</Text></View>
                                         <Text style={styles.tipText}>{tip}</Text>
                                     </View>
-                                ))}
+                                )) : (
+                                    <Text style={styles.tipText}>No tips available yet. Try regenerating analysis.</Text>
+                                )}
                             </View>
 
                             {/* Outcome */}

@@ -4,7 +4,7 @@ import { ScreenLayout } from "../../components/ScreenLayout";
 import { ArrowLeft, CheckCircle, UploadCloud, Camera } from "lucide-react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import * as ImagePicker from 'expo-image-picker';
-import { apiFetch } from "../../lib/api/client";
+import { apiFetch, getToken } from "../../lib/api/client";
 import { useToast } from "../../components/ui/Toast";
 
 export default function AvatarSetupScreen({ navigation }: any) {
@@ -15,9 +15,9 @@ export default function AvatarSetupScreen({ navigation }: any) {
 
     // Check if user already has an avatar
     useEffect(() => {
-        apiFetch('/api/avatar/status').then((res: any) => {
-            if (res.success && res.data.hasAvatar) {
-                setPhotoUri(res.data.avatarUrl);
+        apiFetch<{ hasAvatar: boolean; avatarUrl?: string }>('/api/avatar/status').then((res) => {
+            if (res.success && res.data?.hasAvatar) {
+                setPhotoUri(res.data.avatarUrl ?? null);
                 setSuccess(true);
             }
         });
@@ -43,7 +43,7 @@ export default function AvatarSetupScreen({ navigation }: any) {
         setLoading(true);
 
         try {
-            const importToken = await import('../../lib/api/client').then(m => m.getToken ? m.getToken() : null).catch(() => null);
+            const token = await getToken();
 
             const formData = new FormData();
 
@@ -65,13 +65,18 @@ export default function AvatarSetupScreen({ navigation }: any) {
             const res = await fetch(`${API_URL}/api/avatar/setup`, {
                 method: 'POST',
                 headers: {
-                    'Authorization': `Bearer ${importToken}`,
+                    ...(token ? { Authorization: `Bearer ${token}` } : {}),
                 },
                 body: formData,
             });
 
-            const data = await res.json();
-            if (!data.success) throw new Error(data.error);
+            let data: any = null;
+            try {
+                data = await res.json();
+            } catch {
+                throw new Error(`Avatar setup failed (${res.status})`);
+            }
+            if (!res.ok || !data?.success) throw new Error(data?.error || `Avatar setup failed (${res.status})`);
 
             showToast('Avatar generated! Animations are processing.', 'success');
             setSuccess(true);

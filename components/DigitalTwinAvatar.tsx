@@ -2,25 +2,31 @@ import React, { useState, useEffect } from "react";
 import { View, Text, ActivityIndicator, Platform } from "react-native";
 import { Video, ResizeMode, InterruptionModeAndroid, InterruptionModeIOS, Audio } from "expo-av";
 import { apiFetch } from "../lib/api/client";
-import { useAuth } from "../contexts/AuthContext";
+
+interface AvatarStatePayload {
+    state: string;
+    videoUrl?: string;
+    reasoning?: string;
+}
 
 export function DigitalTwinAvatar() {
-    const { user } = useAuth();
     const [loading, setLoading] = useState(true);
     const [videoUrl, setVideoUrl] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
 
     useEffect(() => {
-        // Configure Expo AV audio routing so video plays silently
-        Audio.setAudioModeAsync({
-            allowsRecordingIOS: false,
-            staysActiveInBackground: false,
-            interruptionModeIOS: InterruptionModeIOS.DoNotMix,
-            playsInSilentModeIOS: true,
-            shouldDuckAndroid: true,
-            interruptionModeAndroid: InterruptionModeAndroid.DoNotMix,
-            playThroughEarpieceAndroid: false,
-        });
+        // Audio API is native-only — skip on web to prevent crash
+        if (Platform.OS !== 'web') {
+            Audio.setAudioModeAsync({
+                allowsRecordingIOS: false,
+                staysActiveInBackground: false,
+                interruptionModeIOS: InterruptionModeIOS.DoNotMix,
+                playsInSilentModeIOS: true,
+                shouldDuckAndroid: true,
+                interruptionModeAndroid: InterruptionModeAndroid.DoNotMix,
+                playThroughEarpieceAndroid: false,
+            });
+        }
     }, []);
 
     useEffect(() => {
@@ -35,23 +41,33 @@ export function DigitalTwinAvatar() {
             // Don't set loading true on interval updates to avoid flicker
             if (!videoUrl) setLoading(true);
             setError(null);
-            const res = await apiFetch<any>('/api/avatar/state');
+            const res = await apiFetch<AvatarStatePayload>('/api/avatar/state');
 
             if (!res.success) throw new Error(res.error);
+            if (!res.data?.videoUrl) throw new Error('No avatar video available yet');
 
-            if (res.data.videoUrl !== videoUrl) {
-                setVideoUrl(res.data.videoUrl);
-            }
+            setVideoUrl(prev => (prev === res.data!.videoUrl ? prev : res.data!.videoUrl!));
         } catch (e: any) {
-            if (e.message.includes("No avatar")) {
+            const message = e?.message || 'Failed to load avatar';
+            if (message.includes("No avatar")) {
                 setError("setup_required");
             } else {
-                setError(e.message);
+                setError(message);
             }
         } finally {
-            if (!videoUrl) setLoading(false);
+            if (!videoUrl) {
+                setLoading(false);
+            }
         }
     };
+
+    if (loading && !videoUrl) {
+        return (
+            <View className="items-center justify-center p-8">
+                <ActivityIndicator size="small" color="#7c3aed" />
+            </View>
+        );
+    }
 
     if (error === "setup_required" || !videoUrl) {
         return (
