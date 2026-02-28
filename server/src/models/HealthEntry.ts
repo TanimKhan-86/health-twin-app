@@ -28,4 +28,7 @@ const HealthEntrySchema = new Schema<IHealthEntry>(
     { timestamps: true }
 );
 
+// One health entry per user per day (date normalized to UTC midnight by routes).
+HealthEntrySchema.index({ userId: 1, date: 1 }, { unique: true });
+
 export default mongoose.model<IHealthEntry>('HealthEntry', HealthEntrySchema);

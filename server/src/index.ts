@@ -1,6 +1,8 @@
+import dotenv from 'dotenv';
+dotenv.config();
+
 import express from 'express';
 import cors from 'cors';
-import dotenv from 'dotenv';
 import { connectDB } from './db';
 import authRoutes from './routes/auth';
 import healthRoutes from './routes/health';
@@ -11,8 +13,6 @@ import seedRoutes from './routes/seed';
 import aiRoutes from './routes/ai';
 import streakRoutes from './routes/streak';
 import avatarRoutes from './routes/avatar';
-
-dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 4000;

@@ -6,6 +6,7 @@ import { Activity, Heart, Moon, Droplets, Trophy, Zap } from "lucide-react-nativ
 import { useFocusEffect } from "@react-navigation/native";
 import { useAuth } from "../../contexts/AuthContext";
 import { getStreak, getTodayHealth } from "../../lib/api/auth";
+import { apiFetch } from "../../lib/api/client";
 import { LinearGradient } from "expo-linear-gradient";
 
 interface MetricCardProps {
@@ -32,14 +33,20 @@ export default function DashboardScreen({ navigation }: any) {
     const [streak, setStreak] = useState(0);
     const [todayHealth, setTodayHealth] = useState<any>(null);
     const [avatarKey, setAvatarKey] = useState("init");
+    const [profileAvatarUrl, setProfileAvatarUrl] = useState<string | null>(user?.profileImage ?? null);
 
     useFocusEffect(useCallback(() => { loadDashboard(); }, []));
 
     const loadDashboard = async () => {
         try {
-            const [streakData, health] = await Promise.all([getStreak(), getTodayHealth()]);
+            const [streakData, health, avatarStatus] = await Promise.all([
+                getStreak(),
+                getTodayHealth(),
+                apiFetch<{ hasAvatar: boolean; avatarUrl?: string }>('/api/avatar/status'),
+            ]);
             setStreak(streakData?.currentStreak ?? 0);
             setTodayHealth(health);
+            setProfileAvatarUrl((avatarStatus.success ? avatarStatus.data?.avatarUrl ?? null : null) ?? user?.profileImage ?? null);
             setAvatarKey(Date.now().toString()); // Force avatar refresh
         } catch (e) { console.warn('Dashboard load error:', e); }
     };
@@ -65,8 +72,8 @@ export default function DashboardScreen({ navigation }: any) {
                             <Text style={styles.streakNum}>{streak}</Text>
                         </TouchableOpacity>
                         <TouchableOpacity onPress={() => navigation.navigate("Settings")} style={styles.avatarWrap}>
-                            {user?.profileImage
-                                ? <Image source={{ uri: user.profileImage }} style={styles.avatarImg} />
+                            {profileAvatarUrl
+                                ? <Image source={{ uri: profileAvatarUrl }} style={styles.avatarImg} />
                                 : <Text style={styles.avatarInitials}>{initials}</Text>}
                         </TouchableOpacity>
                     </View>

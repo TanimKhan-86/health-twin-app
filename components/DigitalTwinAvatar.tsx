@@ -1,18 +1,22 @@
-import React, { useState, useEffect } from "react";
-import { View, Text, ActivityIndicator, Platform } from "react-native";
+import React, { useState, useEffect, useRef, useCallback } from "react";
+import { View, Text, ActivityIndicator, Platform, Image } from "react-native";
 import { Video, ResizeMode, InterruptionModeAndroid, InterruptionModeIOS, Audio } from "expo-av";
 import { apiFetch } from "../lib/api/client";
 
 interface AvatarStatePayload {
     state: string;
     videoUrl?: string;
+    imageUrl?: string | null;
     reasoning?: string;
 }
 
 export function DigitalTwinAvatar() {
     const [loading, setLoading] = useState(true);
     const [videoUrl, setVideoUrl] = useState<string | null>(null);
+    const [imageUrl, setImageUrl] = useState<string | null>(null);
+    const [videoFailed, setVideoFailed] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const hasLoadedRef = useRef(false);
 
     useEffect(() => {
         // Audio API is native-only — skip on web to prevent crash
@@ -29,24 +33,27 @@ export function DigitalTwinAvatar() {
         }
     }, []);
 
-    useEffect(() => {
-        fetchState();
-        // In a real app we might poll this every hour or bind it to a focus event
-        const interval = setInterval(fetchState, 60000);
-        return () => clearInterval(interval);
-    }, []);
-
-    const fetchState = async () => {
+    const fetchState = useCallback(async () => {
         try {
-            // Don't set loading true on interval updates to avoid flicker
-            if (!videoUrl) setLoading(true);
+            if (!hasLoadedRef.current) setLoading(true);
             setError(null);
             const res = await apiFetch<AvatarStatePayload>('/api/avatar/state');
 
             if (!res.success) throw new Error(res.error);
-            if (!res.data?.videoUrl) throw new Error('No avatar video available yet');
+            const nextImage = res.data?.imageUrl ?? null;
+            const nextVideo = res.data?.videoUrl ?? null;
+            setImageUrl(nextImage);
 
-            setVideoUrl(prev => (prev === res.data!.videoUrl ? prev : res.data!.videoUrl!));
+            if (nextVideo) {
+                setVideoUrl(prev => (prev === nextVideo ? prev : nextVideo));
+                setVideoFailed(false);
+                return;
+            }
+
+            setVideoUrl(null);
+            if (!nextImage) {
+                throw new Error('No avatar media available yet');
+            }
         } catch (e: any) {
             const message = e?.message || 'Failed to load avatar';
             if (message.includes("No avatar")) {
@@ -55,13 +62,21 @@ export function DigitalTwinAvatar() {
                 setError(message);
             }
         } finally {
-            if (!videoUrl) {
+            if (!hasLoadedRef.current) {
                 setLoading(false);
+                hasLoadedRef.current = true;
             }
         }
-    };
+    }, []);
 
-    if (loading && !videoUrl) {
+    useEffect(() => {
+        fetchState();
+        // Poll every minute to react to changing health/mood state.
+        const interval = setInterval(fetchState, 60000);
+        return () => clearInterval(interval);
+    }, [fetchState]);
+
+    if (loading && !videoUrl && !imageUrl) {
         return (
             <View className="items-center justify-center p-8">
                 <ActivityIndicator size="small" color="#7c3aed" />
@@ -69,7 +84,7 @@ export function DigitalTwinAvatar() {
         );
     }
 
-    if (error === "setup_required" || !videoUrl) {
+    if (error === "setup_required" && !videoUrl && !imageUrl) {
         return (
             <View className="items-center justify-center p-8">
                 <View className="absolute inset-0 items-center justify-center">
@@ -91,14 +106,16 @@ export function DigitalTwinAvatar() {
 
             <View className="items-center justify-center">
                 {/* The dynamic video frame */}
-                <View style={{ height: 160, width: 160, overflow: 'hidden', alignItems: 'center', justifyContent: 'center', borderRadius: 80, backgroundColor: '#000', shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 10, borderWidth: 4, borderColor: '#fff' }}>
-                    {Platform.OS === 'web' ? (
+                <View style={{ height: 160, width: 160, overflow: 'hidden', alignItems: 'center', justifyContent: 'center', borderRadius: 80, backgroundColor: '#ede9fe', shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 10, borderWidth: 4, borderColor: '#fff' }}>
+                    {videoUrl && !videoFailed ? (Platform.OS === 'web' ? (
                         <video
                             src={videoUrl}
                             autoPlay
                             loop
                             muted
                             playsInline
+                            onError={() => setVideoFailed(true)}
+                            onLoadedData={() => setVideoFailed(false)}
                             style={{ width: '100%', height: '100%', objectFit: 'cover', position: 'absolute', top: 0, left: 0 }}
                         />
                     ) : (
@@ -110,7 +127,13 @@ export function DigitalTwinAvatar() {
                             isMuted={true}
                             shouldPlay={true}
                             isLooping={true}
+                            onLoad={() => setVideoFailed(false)}
+                            onError={() => setVideoFailed(true)}
                         />
+                    )) : imageUrl ? (
+                        <Image source={{ uri: imageUrl }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+                    ) : (
+                        <Text className="text-indigo-400 text-xs font-semibold px-4 text-center">Avatar loading...</Text>
                     )}
                 </View>
             </View>

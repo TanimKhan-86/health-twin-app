@@ -107,15 +107,13 @@ export function AuthProvider({ children }: AuthProviderProps) {
         console.log('[AuthContext] Raw Register Response:', JSON.stringify(res));
 
         if (res.success && res.data) {
-            await persistSession(res.data.token, res.data.user);
-            return res.data.user;
+            return completeRegistration(res.data.token, res.data.user, !!profile?.profileImage);
         }
 
         // Sometimes the backend sends token at root level due to client.ts spread
         const rawRes = res as any;
         if (res.success && rawRes.token && rawRes.user) {
-            await persistSession(rawRes.token, rawRes.user);
-            return rawRes.user;
+            return completeRegistration(rawRes.token, rawRes.user, !!profile?.profileImage);
         }
 
         console.error('[AuthContext] Register failed. Success:', res.success, 'Error:', res.error);
@@ -159,6 +157,30 @@ export function AuthProvider({ children }: AuthProviderProps) {
     };
 
     // ─── Helpers ─────────────────────────────────────────────────────────────────
+    async function completeRegistration(jwtToken: string, authUser: AuthUser, hasProfileImage: boolean): Promise<AuthUser> {
+        await setToken(jwtToken);
+
+        let finalUser = authUser;
+        if (hasProfileImage) {
+            try {
+                const avatarSetup = await apiFetch('/api/avatar/setup', { method: 'POST' });
+                if (!avatarSetup.success) {
+                    console.warn('[Auth] Avatar setup after registration failed:', avatarSetup.error);
+                }
+            } catch (error) {
+                console.warn('[Auth] Avatar setup after registration crashed:', error);
+            }
+
+            const meRes = await apiFetch<{ user: AuthUser }>('/api/auth/me');
+            if (meRes.success && meRes.data?.user) {
+                finalUser = meRes.data.user;
+            }
+        }
+
+        await persistSession(jwtToken, finalUser);
+        return finalUser;
+    }
+
     async function persistSession(jwtToken: string, authUser: AuthUser) {
         await setToken(jwtToken);
         // Only cache lightweight fields — profileImage (base64) is too large for

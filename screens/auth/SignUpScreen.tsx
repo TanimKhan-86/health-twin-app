@@ -41,6 +41,11 @@ export default function SignUpScreen({ navigation }: any) {
             }
         }
 
+        if (step === 3 && !formData.profileImage) {
+            setErrorMsg("Please upload a selfie to continue.");
+            return;
+        }
+
         if (step < 3) setStep(step + 1);
         else handleSignup();
     };
@@ -56,7 +61,7 @@ export default function SignUpScreen({ navigation }: any) {
             mediaTypes: ['images'],  // ← new API (MediaTypeOptions deprecated)
             allowsEditing: true,
             aspect: [1, 1],
-            quality: 0.3,
+            quality: 0.8,
             base64: true,
         });
 
@@ -252,7 +257,7 @@ export default function SignUpScreen({ navigation }: any) {
                     <View className="space-y-6 items-center py-4">
                         <Text className="text-xl font-bold text-slate-800">Profile Picture</Text>
                         <Text className="text-center text-slate-500 px-4">
-                            Upload a photo to personalize your dashboard and digital twin.
+                            Upload a real selfie. This is required to generate your NanoBana avatar and emotion videos.
                         </Text>
 
                         <TouchableOpacity

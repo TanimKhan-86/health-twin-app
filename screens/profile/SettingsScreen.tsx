@@ -5,6 +5,7 @@ import { useToast } from "../../components/ui/Toast";
 import { User, Bell, Download, Trash2, LogOut, ChevronRight, Shield, Database, ArrowLeft } from "lucide-react-native";
 import { useAuth } from "../../contexts/AuthContext";
 import { seedDemoWeek } from "../../lib/api/auth";
+import { apiFetch } from "../../lib/api/client";
 import { LinearGradient } from "expo-linear-gradient";
 
 function SettingRow({ icon, iconBg, label, sub, onPress, isDestructive, rightEl }: {
@@ -28,8 +29,18 @@ export default function SettingsScreen({ navigation }: any) {
     const { showToast } = useToast();
     const [isSeeding, setIsSeeding] = useState(false);
     const [notifications, setNotifications] = useState(true);
+    const [profileAvatarUrl, setProfileAvatarUrl] = useState<string | null>(user?.profileImage ?? null);
 
     const initials = user?.name ? user.name.split(' ').map((n: string) => n[0]).join('').toUpperCase().slice(0, 2) : '?';
+
+    React.useEffect(() => {
+        let isMounted = true;
+        apiFetch<{ hasAvatar: boolean; avatarUrl?: string }>('/api/avatar/status').then((res) => {
+            if (!isMounted) return;
+            setProfileAvatarUrl((res.success ? res.data?.avatarUrl ?? null : null) ?? user?.profileImage ?? null);
+        });
+        return () => { isMounted = false; };
+    }, [user?.profileImage]);
 
     const handleLogout = () => {
         if (Platform.OS === 'web') {
@@ -74,8 +85,8 @@ export default function SettingsScreen({ navigation }: any) {
                 {/* Profile Card */}
                 <View style={styles.profileCard}>
                     <View style={styles.profileAvatar}>
-                        {user?.profileImage
-                            ? <Image source={{ uri: user.profileImage }} style={{ width: 64, height: 64, borderRadius: 32 }} />
+                        {profileAvatarUrl
+                            ? <Image source={{ uri: profileAvatarUrl }} style={{ width: 64, height: 64, borderRadius: 32 }} />
                             : <Text style={styles.avatarInitials}>{initials}</Text>}
                     </View>
                     <View>

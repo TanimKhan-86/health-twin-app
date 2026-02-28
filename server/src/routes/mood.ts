@@ -5,6 +5,29 @@ import MoodEntry from '../models/MoodEntry';
 const router = Router();
 router.use(authenticate);
 
+function toUtcDayStart(input?: string | Date): Date {
+    const parsed = input ? new Date(input) : new Date();
+    if (Number.isNaN(parsed.getTime())) {
+        throw new Error('Invalid date');
+    }
+    parsed.setUTCHours(0, 0, 0, 0);
+    return parsed;
+}
+
+function getErrorMessage(err: any): string {
+    if (err?.name === 'ValidationError') {
+        const first = Object.values(err.errors || {})[0] as { message?: string } | undefined;
+        return first?.message || 'Validation failed';
+    }
+    if (err?.code === 11000) {
+        return 'Daily mood log already exists for this date';
+    }
+    if (typeof err?.message === 'string' && err.message.length > 0) {
+        return err.message;
+    }
+    return 'Server error';
+}
+
 // GET /api/mood
 router.get('/', async (req: AuthRequest, res: Response): Promise<void> => {
     try {
@@ -35,7 +58,7 @@ router.get('/today', async (req: AuthRequest, res: Response): Promise<void> => {
         const entry = await MoodEntry.findOne({
             userId: req.userId,
             date: { $gte: start, $lte: end },
-        }).sort({ createdAt: -1 });
+        }).sort({ updatedAt: -1, createdAt: -1 });
 
         res.json({ success: true, data: entry ?? null });
     } catch (err) {
@@ -67,15 +90,36 @@ router.get('/history', async (req: AuthRequest, res: Response): Promise<void> =>
 router.post('/', async (req: AuthRequest, res: Response): Promise<void> => {
     try {
         const { date, mood, energyLevel, stressLevel, notes } = req.body;
-        const entry = await MoodEntry.create({
-            userId: req.userId,
-            date: date ? new Date(date) : new Date(),
-            mood, energyLevel, stressLevel, notes,
-        });
-        res.status(201).json({ success: true, data: entry });
-    } catch (err) {
+        const normalizedDate = toUtcDayStart(date);
+
+        const setFields: Record<string, unknown> = {};
+        if (mood !== undefined) setFields.mood = mood;
+        if (energyLevel !== undefined) setFields.energyLevel = energyLevel;
+        if (stressLevel !== undefined) setFields.stressLevel = stressLevel;
+        if (notes !== undefined) setFields.notes = notes;
+
+        const entry = await MoodEntry.findOneAndUpdate(
+            { userId: req.userId, date: normalizedDate },
+            {
+                $set: setFields,
+                $setOnInsert: {
+                    userId: req.userId,
+                    date: normalizedDate,
+                },
+            },
+            {
+                new: true,
+                upsert: true,
+                runValidators: true,
+                setDefaultsOnInsert: true,
+            }
+        );
+
+        res.json({ success: true, data: entry });
+    } catch (err: any) {
         console.error(err);
-        res.status(500).json({ success: false, error: 'Server error' });
+        const statusCode = err?.name === 'ValidationError' || err?.code === 11000 || err?.message === 'Invalid date' ? 400 : 500;
+        res.status(statusCode).json({ success: false, error: getErrorMessage(err) });
     }
 });
 

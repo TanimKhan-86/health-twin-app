@@ -6,6 +6,29 @@ import MoodEntry from '../models/MoodEntry';
 const router = Router();
 router.use(authenticate);
 
+function toUtcDayStart(input?: string | Date): Date {
+    const parsed = input ? new Date(input) : new Date();
+    if (Number.isNaN(parsed.getTime())) {
+        throw new Error('Invalid date');
+    }
+    parsed.setUTCHours(0, 0, 0, 0);
+    return parsed;
+}
+
+function getErrorMessage(err: any): string {
+    if (err?.name === 'ValidationError') {
+        const first = Object.values(err.errors || {})[0] as { message?: string } | undefined;
+        return first?.message || 'Validation failed';
+    }
+    if (err?.code === 11000) {
+        return 'Daily health log already exists for this date';
+    }
+    if (typeof err?.message === 'string' && err.message.length > 0) {
+        return err.message;
+    }
+    return 'Server error';
+}
+
 // GET /api/health — all entries for user (optionally last N days)
 router.get('/', async (req: AuthRequest, res: Response): Promise<void> => {
     try {
@@ -36,7 +59,7 @@ router.get('/today', async (req: AuthRequest, res: Response): Promise<void> => {
         const entry = await HealthEntry.findOne({
             userId: req.userId,
             date: { $gte: start, $lte: end },
-        }).sort({ createdAt: -1 });
+        }).sort({ updatedAt: -1, createdAt: -1 });
 
         res.json({ success: true, data: entry ?? null });
     } catch (err) {
@@ -129,15 +152,39 @@ router.post('/seed-demo', async (req: AuthRequest, res: Response): Promise<void>
 router.post('/', async (req: AuthRequest, res: Response): Promise<void> => {
     try {
         const { date, steps, sleepHours, waterLitres, heartRate, energyScore, weight, notes } = req.body;
-        const entry = await HealthEntry.create({
-            userId: req.userId,
-            date: date ? new Date(date) : new Date(),
-            steps, sleepHours, waterLitres, heartRate, energyScore, weight, notes,
-        });
-        res.status(201).json({ success: true, data: entry });
-    } catch (err) {
+        const normalizedDate = toUtcDayStart(date);
+
+        const setFields: Record<string, unknown> = {};
+        if (steps !== undefined) setFields.steps = steps;
+        if (sleepHours !== undefined) setFields.sleepHours = sleepHours;
+        if (waterLitres !== undefined) setFields.waterLitres = waterLitres;
+        if (heartRate !== undefined) setFields.heartRate = heartRate;
+        if (energyScore !== undefined) setFields.energyScore = energyScore;
+        if (weight !== undefined) setFields.weight = weight;
+        if (notes !== undefined) setFields.notes = notes;
+
+        const entry = await HealthEntry.findOneAndUpdate(
+            { userId: req.userId, date: normalizedDate },
+            {
+                $set: setFields,
+                $setOnInsert: {
+                    userId: req.userId,
+                    date: normalizedDate,
+                },
+            },
+            {
+                new: true,
+                upsert: true,
+                runValidators: true,
+                setDefaultsOnInsert: true,
+            }
+        );
+
+        res.json({ success: true, data: entry });
+    } catch (err: any) {
         console.error(err);
-        res.status(500).json({ success: false, error: 'Server error' });
+        const statusCode = err?.name === 'ValidationError' || err?.code === 11000 || err?.message === 'Invalid date' ? 400 : 500;
+        res.status(statusCode).json({ success: false, error: getErrorMessage(err) });
     }
 });
 

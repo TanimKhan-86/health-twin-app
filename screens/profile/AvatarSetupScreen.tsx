@@ -6,25 +6,41 @@ import { LinearGradient } from "expo-linear-gradient";
 import * as ImagePicker from 'expo-image-picker';
 import { apiFetch, getToken } from "../../lib/api/client";
 import { useToast } from "../../components/ui/Toast";
+import { useAuth } from "../../contexts/AuthContext";
 
 export default function AvatarSetupScreen({ navigation }: any) {
+    const { user } = useAuth();
     const { showToast } = useToast();
     const [photoUri, setPhotoUri] = useState<string | null>(null);
     const [loading, setLoading] = useState(false);
     const [success, setSuccess] = useState(false);
     const [statusHint, setStatusHint] = useState<string | null>(null);
+    const [avatarMode, setAvatarMode] = useState<'prebuilt' | 'nanobana'>('prebuilt');
+    const [requiredStates, setRequiredStates] = useState<string[]>(['happy', 'sad', 'sleepy']);
 
     // Check if user already has an avatar
     useEffect(() => {
-        apiFetch<{ hasAvatar: boolean; avatarUrl?: string; ready?: boolean; generatedStates?: string[] }>('/api/avatar/status').then((res) => {
+        apiFetch<{
+            hasAvatar: boolean;
+            avatarUrl?: string;
+            ready?: boolean;
+            generatedStates?: string[];
+            mode?: 'prebuilt' | 'nanobana';
+            requiredStates?: string[];
+        }>('/api/avatar/status').then((res) => {
             if (res.success && res.data?.hasAvatar) {
+                setAvatarMode(res.data.mode || 'prebuilt');
+                setRequiredStates(res.data.requiredStates || ['happy', 'sad', 'sleepy']);
                 setPhotoUri(res.data.avatarUrl ?? null);
                 setSuccess(!!res.data.ready);
                 if (res.data.ready) {
-                    setStatusHint('Avatar is fully ready with all 4 emotional loops.');
+                    setStatusHint(`Avatar is fully ready with loops: ${(res.data.requiredStates || ['happy', 'sad', 'sleepy']).join(', ')}.`);
                 } else {
                     setStatusHint(`Avatar found. Generated states: ${(res.data.generatedStates || []).join(', ') || 'none'}`);
                 }
+            } else if (res.success && res.data) {
+                setAvatarMode(res.data.mode || 'prebuilt');
+                setRequiredStates(res.data.requiredStates || ['happy', 'sad', 'sleepy']);
             }
         });
     }, []);
@@ -45,36 +61,46 @@ export default function AvatarSetupScreen({ navigation }: any) {
 
     // Safe multipart fetch
     const uploadAvatar = async () => {
-        if (!photoUri) return;
         setLoading(true);
 
         try {
             const token = await getToken();
-
-            const formData = new FormData();
-
-            // Expo Web Workaround for FormData with ImagePicker
-            if (photoUri.startsWith('data:') || photoUri.startsWith('blob:')) {
-                const response = await fetch(photoUri);
-                const blob = await response.blob();
-                formData.append('photo', blob, 'avatar.jpg');
-            } else {
-                formData.append('photo', {
-                    uri: photoUri,
-                    name: 'avatar.jpg',
-                    type: 'image/jpeg',
-                } as any);
-            }
-
             const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:4000';
+            const usingProfileImageFallback = !photoUri;
+            let res: Response;
 
-            const res = await fetch(`${API_URL}/api/avatar/setup`, {
-                method: 'POST',
-                headers: {
-                    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-                },
-                body: formData,
-            });
+            if (photoUri) {
+                const formData = new FormData();
+
+                // Expo Web workaround for FormData with ImagePicker
+                if (photoUri.startsWith('data:') || photoUri.startsWith('blob:')) {
+                    const response = await fetch(photoUri);
+                    const blob = await response.blob();
+                    formData.append('photo', blob, 'avatar.jpg');
+                } else {
+                    formData.append('photo', {
+                        uri: photoUri,
+                        name: 'avatar.jpg',
+                        type: 'image/jpeg',
+                    } as any);
+                }
+
+                res = await fetch(`${API_URL}/api/avatar/setup`, {
+                    method: 'POST',
+                    headers: {
+                        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+                    },
+                    body: formData,
+                });
+            } else {
+                // No upload provided: backend will use the user's saved profileImage.
+                res = await fetch(`${API_URL}/api/avatar/setup`, {
+                    method: 'POST',
+                    headers: {
+                        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+                    },
+                });
+            }
 
             let data: any = null;
             try {
@@ -84,9 +110,26 @@ export default function AvatarSetupScreen({ navigation }: any) {
             }
             if (!res.ok || !data?.success) throw new Error(data?.error || `Avatar setup failed (${res.status})`);
 
-            showToast('Avatar created with 4 emotional loop animations.', 'success');
+            const backendMessage = data?.data?.message || data?.message || '';
+            showToast(
+                backendMessage || (
+                    usingProfileImageFallback
+                        ? 'Avatar setup completed.'
+                        : 'Avatar setup completed.'
+                ),
+                'success'
+            );
             setSuccess(true);
-            setStatusHint('Happy, sad, sleepy, and stressed animations are ready.');
+            const nextStates: string[] = data?.data?.requiredStates || requiredStates;
+            setRequiredStates(nextStates);
+            if (data?.data?.mode) {
+                setAvatarMode(data.data.mode);
+            }
+            setStatusHint(
+                data?.data?.ready
+                    ? `${nextStates.join(', ')} loops are ready.`
+                    : backendMessage || 'Avatar setup completed.'
+            );
             setTimeout(() => navigation.goBack(), 1800);
 
         } catch (e: any) {
@@ -105,15 +148,24 @@ export default function AvatarSetupScreen({ navigation }: any) {
                         <Text style={styles.backText}>Back</Text>
                     </TouchableOpacity>
                     <Text style={styles.headerTitle}>Digital Twin Setup</Text>
-                    <Text style={styles.headerSub}>Powered by NanoBana AI 🧬</Text>
+                    <Text style={styles.headerSub}>
+                        {avatarMode === 'prebuilt' ? 'Prebuilt Avatar Mode' : 'Powered by NanoBana AI'}
+                    </Text>
                 </LinearGradient>
 
                 <View style={styles.content}>
                     <View style={styles.card}>
                         <Text style={styles.instructions}>
-                            Upload a clear photo of your face. NanoBana will create a stylized avatar plus 4 loop-ready emotional animations (happy, sad, sleepy, stressed).
+                            {avatarMode === 'prebuilt'
+                                ? `Generation API is disabled. Uploading here only updates your profile photo. Avatar media should be seeded with pre-generated files (${requiredStates.join(', ')}).`
+                                : `Upload a clear photo of your face. NanoBana will create a stylized avatar plus loop-ready emotional animations (${requiredStates.join(', ')}).`}
                         </Text>
                         {statusHint ? <Text style={styles.statusHint}>{statusHint}</Text> : null}
+                        {!photoUri && user?.profileImage ? (
+                            <Text style={styles.statusHint}>
+                                No new upload selected. Tap Generate to use your current profile picture.
+                            </Text>
+                        ) : null}
 
                         <TouchableOpacity onPress={handlePickImage} style={{ width: 200, height: 200, borderRadius: 100, backgroundColor: '#eff6ff', alignSelf: 'center', justifyContent: 'center', alignItems: 'center', overflow: 'hidden', borderWidth: 2, borderColor: '#bfdbfe', borderStyle: 'dashed', marginBottom: 24 }}>
                             {photoUri ? (
@@ -131,18 +183,28 @@ export default function AvatarSetupScreen({ navigation }: any) {
                             )}
                         </TouchableOpacity>
 
-                        {!loading && !success && photoUri && (
+                        {!loading && !success && (photoUri || user?.profileImage) && (
                             <TouchableOpacity onPress={uploadAvatar} style={styles.btnPrimary}>
                                 <UploadCloud size={20} color="white" />
-                                <Text style={styles.btnText}>Generate Avatar</Text>
+                                <Text style={styles.btnText}>
+                                    {avatarMode === 'prebuilt'
+                                        ? (photoUri ? 'Upload Profile Picture' : 'Refresh Avatar Status')
+                                        : (photoUri ? 'Generate Avatar' : 'Generate From Profile Picture')}
+                                </Text>
                             </TouchableOpacity>
                         )}
 
                         {loading && (
                             <View style={styles.loadingContainer}>
                                 <ActivityIndicator size="large" color="#3b82f6" />
-                                <Text style={styles.loadingText}>Building your NanoBana avatar system...</Text>
-                                <Text style={styles.loadingSub}>Generating 4 high-quality loop animations</Text>
+                                <Text style={styles.loadingText}>
+                                    {avatarMode === 'prebuilt' ? 'Checking prebuilt avatar media...' : 'Building your NanoBana avatar system...'}
+                                </Text>
+                                <Text style={styles.loadingSub}>
+                                    {avatarMode === 'prebuilt'
+                                        ? `Expected states: ${requiredStates.join(', ')}`
+                                        : 'Generating high-quality loop animations'}
+                                </Text>
                             </View>
                         )}
 
@@ -150,7 +212,7 @@ export default function AvatarSetupScreen({ navigation }: any) {
                             <View style={styles.successContainer}>
                                 <CheckCircle size={48} color="#10b981" />
                                 <Text style={styles.successText}>Twin Activated!</Text>
-                                <Text style={styles.successSub}>Your dashboard can now auto-switch between happy, sad, sleepy, and stressed loops.</Text>
+                                <Text style={styles.successSub}>Your dashboard can now auto-switch between {requiredStates.join(', ')} loops.</Text>
                             </View>
                         )}
                     </View>
