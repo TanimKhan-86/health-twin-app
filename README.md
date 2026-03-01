@@ -120,6 +120,7 @@ npx expo start
 | POST | `/api/avatar/setup` | ✅ | Avatar setup endpoint (generation in `nanobana` mode, no-op readiness in `prebuilt` mode) |
 | GET | `/api/avatar/status` | ✅ | Avatar readiness + generated state list |
 | GET | `/api/avatar/state` | ✅ | Return one dynamic looping animation for dashboard |
+| GET | `/api/future/insight?days=7` | ✅ | Analyze last 7 days and project next-week dominant state + matching avatar media |
 
 All protected routes require: `Authorization: Bearer <token>`
 

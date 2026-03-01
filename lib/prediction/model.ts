@@ -19,6 +19,28 @@ export interface ForecastPoint {
     predictedMood: string;
 }
 
+function createDeterministicNoiseSeed(
+    baselineSleep: number,
+    baselineSteps: number,
+    simSleep: number,
+    simSteps: number
+): number {
+    // Build a stable seed from inputs so forecast does not jitter between renders.
+    const packed =
+        Math.round(baselineSleep * 10) * 31 +
+        Math.round(simSleep * 10) * 47 +
+        Math.round(baselineSteps / 100) * 53 +
+        Math.round(simSteps / 100) * 71;
+    return Math.abs(packed) + 1;
+}
+
+function deterministicDailyNoise(day: number, seed: number): number {
+    // Smooth bounded variation (~ -1.2 to +1.2) that is reproducible for same inputs.
+    const waveA = Math.sin((day + seed) * 0.55);
+    const waveB = Math.cos((day + seed * 0.13) * 0.34);
+    return (waveA * 0.75 + waveB * 0.45);
+}
+
 /**
  * Calculate predicted energy score based on sleep and steps
  * Formula: (Sleep/8 * 60) + (Steps/10000 * 40)
@@ -62,6 +84,7 @@ export const generateHabitSimulation = (
 
     // The total difference in energy expected
     const totalDiff = targetEnergy - baselineEnergy;
+    const noiseSeed = createDeterministicNoiseSeed(baselineSleep, baselineSteps, simSleep, simSteps);
 
     const today = new Date();
 
@@ -72,10 +95,10 @@ export const generateHabitSimulation = (
         const adaptationRate = 0.2;
         const adaptationFactor = 1 - Math.exp(-day * adaptationRate);
 
-        // Add some noise (+/- 2-3 points) so the chart looks organic, not perfectly smooth
-        const randomNoise = (Math.random() * 4) - 2;
+        // Keep the line organic without introducing render-to-render randomness.
+        const noise = deterministicDailyNoise(day, noiseSeed);
 
-        let projectedEnergy = baselineEnergy + (totalDiff * adaptationFactor) + randomNoise;
+        let projectedEnergy = baselineEnergy + (totalDiff * adaptationFactor) + noise;
 
         // Clamp to 0-100 bounds
         projectedEnergy = Math.max(0, Math.min(100, Math.round(projectedEnergy)));

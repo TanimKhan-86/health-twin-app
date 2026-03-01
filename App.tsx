@@ -17,6 +17,7 @@ import DailyLogScreen from './screens/main/DailyLogScreen';
 import DashboardScreen from './screens/main/DashboardScreen';
 import DataEntryScreen from './screens/main/DataEntryScreen';
 import WhatIfScreen from './screens/main/WhatIfScreen';
+import FutureYouScreen from './screens/main/FutureYouScreen';
 import AchievementsScreen from './screens/main/AchievementsScreen';
 import WeeklySummaryScreen from './screens/main/WeeklySummaryScreen';
 import AIWeeklyAnalysisScreen from './screens/main/AIWeeklyAnalysisScreen';
@@ -46,6 +47,7 @@ function AppNavigator() {
       <Stack.Screen name="Main" component={DashboardScreen} />
       <Stack.Screen name="DailyLog" component={DailyLogScreen} />
       <Stack.Screen name="DataEntry" component={DataEntryScreen} />
+      <Stack.Screen name="FutureYou" component={FutureYouScreen} />
       <Stack.Screen name="WhatIf" component={WhatIfScreen} />
       <Stack.Screen name="Achievements" component={AchievementsScreen} />
       <Stack.Screen name="WeeklySummary" component={WeeklySummaryScreen} />

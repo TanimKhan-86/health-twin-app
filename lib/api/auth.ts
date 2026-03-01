@@ -148,6 +148,41 @@ export async function getStreak(): Promise<StreakData> {
     return res.success && res.data ? res.data : { currentStreak: 0, longestStreak: 0, lastLogDate: null };
 }
 
+// ─── Future You ───────────────────────────────────────────────────────────────
+export type FutureState = 'happy' | 'sad' | 'sleepy';
+
+export interface FutureInsight {
+    period: {
+        days: number;
+        from: string;
+        to: string;
+    };
+    hasSevenDayData: boolean;
+    analyzedDays: number;
+    dominantState: FutureState;
+    currentState: FutureState;
+    projectedState: FutureState;
+    stateBreakdown: Record<FutureState, number>;
+    dailyStates: Array<{ date: string; state: FutureState | null; reason: string | null }>;
+    reasoning: {
+        dominant: string;
+        current: string;
+        projection: string;
+    };
+    insight: string;
+    media: {
+        imageUrl: string | null;
+        projectedVideoUrl: string | null;
+        availableStates: string[];
+    };
+}
+
+export async function getFutureInsight(days = 7): Promise<FutureInsight | null> {
+    const safeDays = Math.max(1, Math.min(30, Math.trunc(days)));
+    const res = await apiFetch<FutureInsight>(`/api/future/insight?days=${safeDays}`);
+    return res.success ? (res.data ?? null) : null;
+}
+
 // ─── Scores (legacy, keep for prediction feature) ────────────────────────────
 export async function postScore(inputs: Record<string, unknown>, score: number): Promise<boolean> {
     const res = await apiFetch('/api/scores', {

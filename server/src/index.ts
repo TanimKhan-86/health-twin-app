@@ -13,6 +13,7 @@ import seedRoutes from './routes/seed';
 import aiRoutes from './routes/ai';
 import streakRoutes from './routes/streak';
 import avatarRoutes from './routes/avatar';
+import futureRoutes from './routes/future';
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -41,6 +42,7 @@ app.use('/api/seed', seedRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/streak', streakRoutes);
 app.use('/api/avatar', avatarRoutes);
+app.use('/api/future', futureRoutes);
 
 // Health check
 app.get('/', (_req, res) => {

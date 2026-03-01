@@ -115,7 +115,7 @@ export default function DashboardScreen({ navigation }: any) {
 
                 {/* Quick Actions */}
                 <View style={styles.quickActions}>
-                    <TouchableOpacity style={styles.quickBtn} onPress={() => navigation.navigate('WhatIf')}>
+                    <TouchableOpacity style={styles.quickBtn} onPress={() => navigation.navigate('FutureYou')}>
                         <Text style={styles.quickBtnText}>🔮 Future You</Text>
                     </TouchableOpacity>
                     <TouchableOpacity style={[styles.quickBtn, styles.quickBtnRight]} onPress={() => navigation.navigate('Analytics')}>

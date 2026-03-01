@@ -459,14 +459,37 @@ router.get('/state', requireAuth, async (req: AuthRequest, res) => {
             return acc;
         }, {} as Record<StateType, string>);
 
-        const { state: selectedState, reasoning } = chooseAvatarState(health, mood, ACTIVE_AVATAR_STATES);
+        const { state: inferredState, reasoning } = chooseAvatarState(health, mood, ACTIVE_AVATAR_STATES);
+        const requestedStateRaw = typeof req.query.state === 'string'
+            ? req.query.state.trim().toLowerCase()
+            : null;
+        const requestedState = requestedStateRaw && ACTIVE_AVATAR_STATES.includes(requestedStateRaw as StateType)
+            ? (requestedStateRaw as StateType)
+            : null;
+        const preferredCandidates: Array<StateType | null> = [
+            requestedState,
+            inferredState,
+            'happy',
+            'sad',
+            'sleepy',
+            'tired',
+        ];
+        const preferredStates = Array.from(
+            new Set<StateType>(
+                preferredCandidates.filter(
+                    (value): value is StateType => !!value && ACTIVE_AVATAR_STATES.includes(value)
+                )
+            )
+        );
+
+        const resolvedState = preferredStates.find((state) => !!animMap[state]) || inferredState;
         const fallbackVideo =
-            animMap[selectedState] ||
-            animMap.happy ||
-            animMap.sad ||
-            animMap.sleepy ||
+            animMap[resolvedState] ||
             usableAnimations[0]?.videoUrl ||
             null;
+        const resolvedReasoning = requestedState
+            ? `Client preview requested "${requestedState}" state`
+            : reasoning;
 
         if (!fallbackVideo && !avatar?.avatarImageUrl) {
             return res.status(404).json({ success: false, error: 'No avatar media available yet' });
@@ -475,11 +498,12 @@ router.get('/state', requireAuth, async (req: AuthRequest, res) => {
         return res.json({
             success: true,
             data: {
-                state: selectedState,
+                state: resolvedState,
                 videoUrl: fallbackVideo,
+                videoByState: animMap,
                 imageUrl: avatar?.avatarImageUrl ?? null,
                 avatarFingerprint,
-                reasoning,
+                reasoning: resolvedReasoning,
                 mode: AVATAR_MODE,
                 requiredStates: ACTIVE_AVATAR_STATES,
                 availableStates: Object.keys(animMap),
@@ -536,6 +560,56 @@ router.get('/status', requireAuth, async (req: AuthRequest, res) => {
         });
     } catch (error) {
         return res.status(500).json({ success: false, error: 'Failed to fetch status' });
+    }
+});
+
+/**
+ * GET /api/avatar/library
+ * Returns avatar image + per-state animation URLs for client-driven previews
+ * (e.g., Scenario Explorer simulation state preview).
+ */
+router.get('/library', requireAuth, async (req: AuthRequest, res) => {
+    try {
+        const userId = req.userId;
+        if (!userId) {
+            return res.status(401).json({ success: false, error: 'Unauthorized' });
+        }
+
+        const [avatar, animations] = await Promise.all([
+            Avatar.findOne({ userId }),
+            AvatarAnimation.find({ userId, stateType: { $in: ACTIVE_AVATAR_STATES } }),
+        ]);
+
+        if (!avatar && animations.length === 0) {
+            return res.status(404).json({ success: false, error: 'No avatar media found. Please complete setup.' });
+        }
+
+        const avatarFingerprint = avatar?.avatarImageUrl ? computeAvatarFingerprint(avatar.avatarImageUrl) : null;
+        const usableAnimations = animations.filter(anim =>
+            isAvatarBasedAnimation(
+                { videoUrl: anim.videoUrl, generationMetadata: safeMetadata(anim.generationMetadata) },
+                avatarFingerprint
+            )
+        );
+
+        const videoByState = usableAnimations.reduce((acc, anim) => {
+            acc[anim.stateType] = anim.videoUrl;
+            return acc;
+        }, {} as Record<StateType, string>);
+
+        return res.json({
+            success: true,
+            data: {
+                mode: AVATAR_MODE,
+                requiredStates: ACTIVE_AVATAR_STATES,
+                imageUrl: avatar?.avatarImageUrl ?? null,
+                videoByState,
+                availableStates: Object.keys(videoByState),
+            },
+        });
+    } catch (error) {
+        console.error('Avatar library fetch error:', error);
+        return res.status(500).json({ success: false, error: 'Failed to fetch avatar library' });
     }
 });
 
