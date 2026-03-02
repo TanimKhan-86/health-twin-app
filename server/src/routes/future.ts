@@ -18,7 +18,7 @@ import {
     resolveMediaUrlForClient,
 } from '../services/mediaStoreService';
 
-type FutureState = 'happy' | 'sad' | 'sleepy';
+type FutureState = 'happy' | 'sad' | 'sleepy' | 'calm';
 
 interface HealthSignal {
     date: Date;
@@ -53,7 +53,7 @@ interface InferredState {
     reason: string;
 }
 
-const FUTURE_STATES: FutureState[] = ['happy', 'sad', 'sleepy'];
+const FUTURE_STATES: FutureState[] = ['happy', 'sad', 'sleepy', 'calm'];
 const router = Router();
 router.use(authenticate);
 
@@ -110,6 +110,30 @@ function inferState({ health, mood }: StateSignalContext): InferredState {
         return { state: 'sad', reason: `Stress/low-energy signal from ${source}` };
     }
 
+    const lowStress = stressLevel === 0 || stressLevel <= 4;
+    const calmMoodPreferred = moodName === 'calm' || moodName === 'neutral';
+
+    const calmSignal =
+        moodName === 'calm'
+        || (
+            moodName === 'neutral'
+            && lowStress
+            && (sleepHours === 0 || sleepHours >= 6)
+        )
+        || (
+            lowStress
+            && sleepHours >= 6
+            && sleepHours < 7.5
+            && (energyScore === 0 || (energyScore >= 50 && energyScore < 75))
+            && (moodEnergy === 0 || (moodEnergy >= 5 && moodEnergy <= 7))
+            && (steps === 0 || (steps >= 3500 && steps <= 9000))
+        );
+
+    // Prioritize calm when user mood is calm/neutral and metrics are balanced.
+    if (calmMoodPreferred && calmSignal) {
+        return { state: 'calm', reason: 'Calm/neutral mood with balanced low-stress pattern' };
+    }
+
     let positiveSignals = 0;
     if (steps >= 8000) positiveSignals += 1;
     if (sleepHours >= 7) positiveSignals += 1;
@@ -117,8 +141,15 @@ function inferState({ health, mood }: StateSignalContext): InferredState {
     if (energyScore >= 70) positiveSignals += 1;
     if (moodEnergy >= 7) positiveSignals += 1;
 
-    if (positiveSignals >= 2) {
-        return { state: 'happy', reason: `Positive activity pattern (${positiveSignals} strong signals)` };
+    if (positiveSignals >= 3 && lowStress) {
+        return {
+            state: 'happy',
+            reason: `Strong positive activity pattern (${positiveSignals} signals) with low stress (${stressLevel || 0}/10)`,
+        };
+    }
+
+    if (calmSignal) {
+        return { state: 'calm', reason: 'Balanced low-stress pattern detected' };
     }
 
     return { state: 'sad', reason: 'Default low/neutral behavior pattern' };
@@ -133,7 +164,7 @@ function selectTopState(
     for (const preferred of tieBreakerOrder) {
         if (winners.includes(preferred)) return preferred;
     }
-    return winners[0] || 'sad';
+    return winners[0] || 'calm';
 }
 
 function isUsableAnimation(animation: AvatarAnimationSignal, avatarFingerprint?: string | null): boolean {
@@ -210,6 +241,7 @@ router.get('/insight', async (req: AuthRequest, res: Response): Promise<void> =>
                 .sort({ date: -1, updatedAt: -1, createdAt: -1 })
                 .lean<MoodSignal | null>(),
             Avatar.findOne({ userId })
+                .sort({ updatedAt: -1, createdAt: -1 })
                 .select('avatarImageUrl generationMetadata')
                 .lean<{ _id?: unknown; avatarImageUrl?: string; generationMetadata?: unknown } | null>(),
             AvatarAnimation.find({ userId, stateType: { $in: FUTURE_STATES } })
@@ -228,7 +260,7 @@ router.get('/insight', async (req: AuthRequest, res: Response): Promise<void> =>
         }
 
         const dailyStates: Array<{ date: string; state: FutureState | null; reason: string | null }> = [];
-        const stateBreakdown: Record<FutureState, number> = { happy: 0, sad: 0, sleepy: 0 };
+        const stateBreakdown: Record<FutureState, number> = { happy: 0, sad: 0, sleepy: 0, calm: 0 };
 
         for (let i = 0; i < query.days; i += 1) {
             const day = shiftUtcDays(since, i);
@@ -246,7 +278,7 @@ router.get('/insight', async (req: AuthRequest, res: Response): Promise<void> =>
             dailyStates.push({ date: key, state: inferred.state, reason: inferred.reason });
         }
 
-        const dominantState = selectTopState(stateBreakdown, ['sad', 'sleepy', 'happy']);
+        const dominantState = selectTopState(stateBreakdown, ['calm', 'sad', 'sleepy', 'happy']);
         const currentInferred = inferState({ health: latestHealth, mood: latestMood });
         const currentState = currentInferred.state;
 
@@ -258,7 +290,7 @@ router.get('/insight', async (req: AuthRequest, res: Response): Promise<void> =>
             weightedVotes[lastKnownState] += 1;
         }
 
-        const projectedState = selectTopState(weightedVotes, [currentState, dominantState, 'sad', 'sleepy', 'happy']);
+        const projectedState = selectTopState(weightedVotes, [currentState, dominantState, 'calm', 'sad', 'sleepy', 'happy']);
         const analyzedDays = dailyStates.filter((entry) => entry.state !== null).length;
         const dominantDays = stateBreakdown[dominantState];
         const dominantPercent = analyzedDays > 0 ? Math.round((dominantDays / analyzedDays) * 100) : 0;
@@ -293,6 +325,7 @@ router.get('/insight', async (req: AuthRequest, res: Response): Promise<void> =>
             animationMap[projectedState]
             || animationMap[dominantState]
             || animationMap.happy
+            || animationMap.calm
             || animationMap.sad
             || animationMap.sleepy
             || null;

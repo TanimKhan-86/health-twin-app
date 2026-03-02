@@ -19,3 +19,21 @@ test('chooseAvatarState returns happy on strong positive signals', () => {
     );
     assert.equal(result.state, 'happy');
 });
+
+test('chooseAvatarState returns calm for balanced low-stress metrics', () => {
+    const result = chooseAvatarState(
+        { sleepHours: 6.7, steps: 6200, waterLitres: 1.8, energyScore: 62 },
+        { mood: 'calm', energyLevel: 6, stressLevel: 2 },
+        ['happy', 'sad', 'sleepy', 'calm']
+    );
+    assert.equal(result.state, 'calm');
+});
+
+test('chooseAvatarState prioritizes calm over happy for calm mood patterns', () => {
+    const result = chooseAvatarState(
+        { sleepHours: 7.1, steps: 8400, waterLitres: 2.1, energyScore: 72 },
+        { mood: 'calm', energyLevel: 7, stressLevel: 2 },
+        ['happy', 'sad', 'sleepy', 'calm']
+    );
+    assert.equal(result.state, 'calm');
+});

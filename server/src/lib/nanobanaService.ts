@@ -99,6 +99,7 @@ function stateInstruction(state: StateType): string {
         happy: 'smiling, uplifting, energetic body language',
         sad: 'subtle sadness, lowered eyebrows, slower movement',
         sleepy: 'yawning, droopy eyelids, slow relaxed motion',
+        calm: 'relaxed gentle smile, steady breathing, composed neutral-positive expression',
         tired: 'fatigued expression, heavier eyelids, low-energy movement',
     };
     return map[state];

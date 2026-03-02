@@ -1,10 +1,9 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState, useEffect } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator, Platform, Image } from 'react-native';
 import { ScreenLayout } from '../../components/ScreenLayout';
 import { RefreshCw, Sparkles, CalendarDays, TrendingUp } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Video, ResizeMode } from 'expo-av';
-import { useFocusEffect } from '@react-navigation/native';
 import { FutureInsight, getFutureInsight } from '../../lib/api/auth';
 import { apiFetch } from '../../lib/api/client';
 import { useToast } from '../../components/ui/Toast';
@@ -20,9 +19,11 @@ const STATE_THEME = {
     happy: { label: 'Happy', color: '#10b981', bg: '#ecfdf5', emoji: '😄' },
     sad: { label: 'Sad', color: '#7c3aed', bg: '#f5f3ff', emoji: '😔' },
     sleepy: { label: 'Sleepy', color: '#f59e0b', bg: '#fffbeb', emoji: '😴' },
+    calm: { label: 'Calm', color: '#0f766e', bg: '#ccfbf1', emoji: '😌' },
 } as const;
 
 type FutureState = keyof typeof STATE_THEME;
+const FUTURE_STATES = Object.keys(STATE_THEME) as FutureState[];
 const WEB_VIDEO_STYLE: React.CSSProperties = {
     width: '100%',
     height: '100%',
@@ -60,11 +61,13 @@ export default function FutureYouScreen({ navigation }: AppScreenProps<'FutureYo
         }
     }, []);
 
-    useFocusEffect(
-        useCallback(() => {
-            loadInsight(false);
-        }, [loadInsight])
-    );
+    useEffect(() => {
+        void loadInsight(false);
+        const unsubscribe = navigation.addListener('focus', () => {
+            void loadInsight(false);
+        });
+        return unsubscribe;
+    }, [navigation, loadInsight]);
 
     const projectedState = (insight?.projectedState || 'sad') as FutureState;
     const dominantState = (insight?.dominantState || 'sad') as FutureState;
@@ -111,7 +114,7 @@ export default function FutureYouScreen({ navigation }: AppScreenProps<'FutureYo
 
     const totalTracked = useMemo(() => {
         if (!insight) return 0;
-        return insight.stateBreakdown.happy + insight.stateBreakdown.sad + insight.stateBreakdown.sleepy;
+        return FUTURE_STATES.reduce((sum, state) => sum + (insight.stateBreakdown[state] ?? 0), 0);
     }, [insight]);
 
     const handleSeedDemo = async () => {
@@ -260,7 +263,7 @@ export default function FutureYouScreen({ navigation }: AppScreenProps<'FutureYo
                             <Text style={styles.cardTitle}>Trait Distribution</Text>
                         </View>
 
-                        {(['happy', 'sad', 'sleepy'] as FutureState[]).map((state) => {
+                        {FUTURE_STATES.map((state) => {
                             const theme = STATE_THEME[state];
                             const count = insight?.stateBreakdown?.[state] ?? 0;
                             const percent = totalTracked > 0 ? Math.round((count / totalTracked) * 100) : 0;
@@ -283,7 +286,7 @@ export default function FutureYouScreen({ navigation }: AppScreenProps<'FutureYo
                             <EmptyState
                                 icon="📉"
                                 title="No 7-day data yet"
-                                description="Seed demo data first, then Future You can predict whether your next weeks trend happy, sad, or sleepy."
+                                description="Seed demo data first, then Future You can predict whether your next weeks trend happy, calm, sad, or sleepy."
                             />
                             <View style={{ marginTop: 12 }}>
                                 <AppButton

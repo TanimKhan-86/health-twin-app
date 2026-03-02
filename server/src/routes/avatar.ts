@@ -34,16 +34,24 @@ interface AuthRequest extends express.Request {
 
 const router = express.Router();
 type AvatarMode = 'prebuilt' | 'nanobana';
-const NANO_BANA_STATES: StateType[] = ['happy', 'sad', 'sleepy', 'tired'];
-const PREBUILT_STATES: StateType[] = ['happy', 'sad', 'sleepy'];
+const NANO_BANA_STATES: StateType[] = ['happy', 'sad', 'sleepy', 'calm', 'tired'];
+const PREBUILT_REQUIRED_STATES: StateType[] = ['happy', 'sad', 'sleepy'];
+const PREBUILT_OPTIONAL_STATES: StateType[] = ['calm'];
+const PREBUILT_STATES: StateType[] = [...PREBUILT_REQUIRED_STATES, ...PREBUILT_OPTIONAL_STATES];
 const AVATAR_MODE: AvatarMode = (() => {
     const raw = (process.env.AVATAR_MODE || 'prebuilt').trim().toLowerCase();
     if (raw === 'nanobana' || raw === 'live') return 'nanobana';
     return 'prebuilt';
 })();
 const ACTIVE_AVATAR_STATES: StateType[] = AVATAR_MODE === 'nanobana' ? NANO_BANA_STATES : PREBUILT_STATES;
+const REQUIRED_READY_STATES: StateType[] = AVATAR_MODE === 'nanobana'
+    ? NANO_BANA_STATES
+    : PREBUILT_REQUIRED_STATES;
+const DAILY_LOG_SOURCE = 'daily_log';
+const LEGACY_DAILY_LOG_HEALTH_NOTE_PATTERN = /^Active minutes:/i;
+const LEGACY_DAILY_LOG_MOOD_NOTE_PATTERN = /Daily log entry/i;
 const avatarStateQuerySchema = z.object({
-    state: z.enum(['happy', 'sad', 'sleepy', 'tired']).optional(),
+    state: z.enum(['happy', 'sad', 'sleepy', 'calm', 'tired']).optional(),
     date: z.string().trim().optional(),
     includeMedia: z.union([z.string(), z.boolean()]).optional(),
 });
@@ -155,7 +163,11 @@ function isGeneratedForAvatar(
         : null;
 
     if (avatarFingerprint) {
-        return animationFingerprint === avatarFingerprint;
+        if (animationFingerprint) {
+            return animationFingerprint === avatarFingerprint;
+        }
+        // Prebuilt media can be fingerprintless on older seeded records.
+        return AVATAR_MODE === 'prebuilt' && provider.startsWith('prebuilt_');
     }
 
     return provider === 'nanobana_google'
@@ -203,7 +215,7 @@ router.post('/setup', requireAuth, upload.single('photo'), async (req: AuthReque
             }
 
             const [avatar, animations] = await Promise.all([
-                Avatar.findOne({ userId }),
+                Avatar.findOne({ userId }).sort({ updatedAt: -1, createdAt: -1 }),
                 AvatarAnimation.find({ userId, stateType: { $in: ACTIVE_AVATAR_STATES } }),
             ]);
 
@@ -220,7 +232,7 @@ router.post('/setup', requireAuth, upload.single('photo'), async (req: AuthReque
                         .map((anim) => anim.stateType)
                 )
             );
-            const hasAllStates = ACTIVE_AVATAR_STATES.every((state) => generatedStates.includes(state));
+            const hasAllStates = REQUIRED_READY_STATES.every((state) => generatedStates.includes(state));
 
             sendSuccess(res, {
                 mode: AVATAR_MODE,
@@ -228,7 +240,8 @@ router.post('/setup', requireAuth, upload.single('photo'), async (req: AuthReque
                 imageUrl: resolveMediaUrlForClient(req, avatar?.avatarImageUrl ?? null),
                 profileImage: resolveMediaUrlForClient(req, user.profileImage ?? null),
                 generatedStates,
-                pendingStates: ACTIVE_AVATAR_STATES.filter((state) => !generatedStates.includes(state)),
+                requiredStates: REQUIRED_READY_STATES,
+                pendingStates: REQUIRED_READY_STATES.filter((state) => !generatedStates.includes(state)),
                 ready: !!avatar && hasAllStates,
                 message: hasAllStates
                     ? 'Prebuilt avatar media is ready. Generation API is disabled in prebuilt mode.'
@@ -275,7 +288,7 @@ router.post('/setup', requireAuth, upload.single('photo'), async (req: AuthReque
         }
 
         // Explicitly read avatar back from DB before animation generation (required flow).
-        const savedAvatar = await Avatar.findOne({ userId });
+        const savedAvatar = await Avatar.findOne({ userId }).sort({ updatedAt: -1, createdAt: -1 });
         if (!savedAvatar?.avatarImageUrl) {
             sendError(res, 500, 'Avatar saved but could not be reloaded from DB');
             return;
@@ -437,17 +450,40 @@ router.get('/state', requireAuth, async (req: AuthRequest, res) => {
 
         const { start: todayStartUtc, end: tomorrowStartUtc } = getUtcDayRange(query.date);
 
+        const requestedStateRaw = query.state ?? null;
+        const includeMedia = parseIncludeMedia(query.includeMedia);
+        const requestedState = requestedStateRaw && ACTIVE_AVATAR_STATES.includes(requestedStateRaw as StateType)
+            ? (requestedStateRaw as StateType)
+            : null;
+
         const [avatar, animationSignals, health, mood] = await Promise.all([
             Avatar.findOne({ userId })
+                .sort({ updatedAt: -1, createdAt: -1 })
                 .select('avatarImageUrl generationMetadata')
                 .lean<{ avatarImageUrl?: string; generationMetadata?: Record<string, unknown> } | null>(),
             AvatarAnimation.find({ userId, stateType: { $in: ACTIVE_AVATAR_STATES } })
                 .select('stateType generationMetadata')
                 .lean<AnimationStatusSignal[]>(),
-            HealthEntry.findOne({ userId, date: { $gte: todayStartUtc, $lt: tomorrowStartUtc } })
+            HealthEntry.findOne({
+                userId,
+                date: { $gte: todayStartUtc, $lt: tomorrowStartUtc },
+                $or: [
+                    { source: DAILY_LOG_SOURCE },
+                    { source: { $exists: false }, notes: LEGACY_DAILY_LOG_HEALTH_NOTE_PATTERN },
+                    { source: null, notes: LEGACY_DAILY_LOG_HEALTH_NOTE_PATTERN },
+                ],
+            })
                 .sort({ updatedAt: -1, createdAt: -1 })
                 .lean(),
-            MoodEntry.findOne({ userId, date: { $gte: todayStartUtc, $lt: tomorrowStartUtc } })
+            MoodEntry.findOne({
+                userId,
+                date: { $gte: todayStartUtc, $lt: tomorrowStartUtc },
+                $or: [
+                    { source: DAILY_LOG_SOURCE },
+                    { source: { $exists: false }, notes: LEGACY_DAILY_LOG_MOOD_NOTE_PATTERN },
+                    { source: null, notes: LEGACY_DAILY_LOG_MOOD_NOTE_PATTERN },
+                ],
+            })
                 .sort({ updatedAt: -1, createdAt: -1 })
                 .lean(),
         ]);
@@ -468,16 +504,17 @@ router.get('/state', requireAuth, async (req: AuthRequest, res) => {
         );
         const generatedStateSet = new Set(generatedStates);
 
+        if (!requestedState && !health && !mood) {
+            sendError(res, 404, 'No Daily Log vitals found for this date. Log Daily Vitals first.');
+            return;
+        }
+
         const { state: inferredState, reasoning } = chooseAvatarState(health, mood, ACTIVE_AVATAR_STATES);
-        const requestedStateRaw = query.state ?? null;
-        const includeMedia = parseIncludeMedia(query.includeMedia);
-        const requestedState = requestedStateRaw && ACTIVE_AVATAR_STATES.includes(requestedStateRaw as StateType)
-            ? (requestedStateRaw as StateType)
-            : null;
         const preferredCandidates: Array<StateType | null> = [
             requestedState,
             inferredState,
             'happy',
+            'calm',
             'sad',
             'sleepy',
             'tired',
@@ -585,6 +622,7 @@ router.get('/status', requireAuth, async (req: AuthRequest, res) => {
 
         const [avatar, animationSignals] = await Promise.all([
             Avatar.findOne({ userId })
+                .sort({ updatedAt: -1, createdAt: -1 })
                 .select('avatarImageUrl generationMetadata')
                 .lean<{ _id?: unknown; avatarImageUrl?: string; generationMetadata?: Record<string, unknown> } | null>(),
             AvatarAnimation.find({ userId, stateType: { $in: ACTIVE_AVATAR_STATES } })
@@ -601,7 +639,7 @@ router.get('/status', requireAuth, async (req: AuthRequest, res) => {
                     .map((a) => a.stateType)
             )
         );
-        const hasAllStates = ACTIVE_AVATAR_STATES.every((state) => generatedStates.includes(state));
+        const hasAllStates = REQUIRED_READY_STATES.every((state) => generatedStates.includes(state));
 
         sendSuccess(res, {
             hasAvatar: !!avatar,
@@ -609,9 +647,9 @@ router.get('/status', requireAuth, async (req: AuthRequest, res) => {
             avatarFingerprint,
             stylePreset: avatar?.generationMetadata?.stylePreset || 'health_twin_demo_style_v1',
             mode: AVATAR_MODE,
-            requiredStates: ACTIVE_AVATAR_STATES,
+            requiredStates: REQUIRED_READY_STATES,
             generatedStates,
-            pendingStates: ACTIVE_AVATAR_STATES.filter((state) => !generatedStates.includes(state)),
+            pendingStates: REQUIRED_READY_STATES.filter((state) => !generatedStates.includes(state)),
             ready: !!avatar && hasAllStates,
         });
         return;
@@ -636,6 +674,7 @@ router.get('/library', requireAuth, async (req: AuthRequest, res) => {
 
         const [avatar, animations] = await Promise.all([
             Avatar.findOne({ userId })
+                .sort({ updatedAt: -1, createdAt: -1 })
                 .select('avatarImageUrl generationMetadata')
                 .lean<{ _id?: unknown; avatarImageUrl?: string; generationMetadata?: Record<string, unknown> } | null>(),
             AvatarAnimation.find({ userId, stateType: { $in: ACTIVE_AVATAR_STATES } })

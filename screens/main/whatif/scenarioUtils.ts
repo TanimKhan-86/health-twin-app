@@ -1,4 +1,4 @@
-export type ScenarioAvatarState = 'happy' | 'sad' | 'sleepy';
+export type ScenarioAvatarState = 'happy' | 'sad' | 'sleepy' | 'calm';
 export type ConfidenceLevel = 'high' | 'medium' | 'low';
 export type ScenarioSlot = 'A' | 'B';
 
@@ -32,12 +32,13 @@ export interface DataConfidenceAssessment {
     note: string;
 }
 
-export const SCENARIO_STATES: ScenarioAvatarState[] = ['happy', 'sad', 'sleepy'];
+export const SCENARIO_STATES: ScenarioAvatarState[] = ['happy', 'sad', 'sleepy', 'calm'];
 
 export const AVATAR_STATE_META: Record<ScenarioAvatarState, { label: string; emoji: string }> = {
     happy: { label: 'Happy', emoji: '😄' },
     sad: { label: 'Sad', emoji: '😔' },
     sleepy: { label: 'Sleepy', emoji: '😴' },
+    calm: { label: 'Calm', emoji: '😌' },
 };
 
 export const CONFIDENCE_META: Record<ConfidenceLevel, { label: string; color: string; bg: string; border: string }> = {
@@ -65,18 +66,27 @@ export function inferSimulationAvatarDecision(simSleep: number, predictedEnergy:
         };
     }
 
-    if (simSleep >= 7 && predictedEnergy >= 70) {
+    if (simSleep >= 7.5 && predictedEnergy >= 80) {
         return {
             state: 'happy',
             ruleName: 'Rule C',
-            ruleExpression: 'if sleep >= 7h and predictedEnergy >= 70 -> happy',
+            ruleExpression: 'if sleep >= 7.5h and predictedEnergy >= 80 -> happy',
+            matchedBecause: `sleep=${simSleep.toFixed(1)}h and energy=${predictedEnergy}`,
+        };
+    }
+
+    if (simSleep >= 6 && predictedEnergy >= 55) {
+        return {
+            state: 'calm',
+            ruleName: 'Rule D',
+            ruleExpression: 'if sleep >= 6h and predictedEnergy >= 55 -> calm',
             matchedBecause: `sleep=${simSleep.toFixed(1)}h and energy=${predictedEnergy}`,
         };
     }
 
     return {
         state: 'sad',
-        ruleName: 'Rule D',
+        ruleName: 'Rule E',
         ruleExpression: 'otherwise -> sad',
         matchedBecause: `sleep=${simSleep.toFixed(1)}h and energy=${predictedEnergy}`,
     };
@@ -88,6 +98,7 @@ export function normalizeStateVideos(raw?: Record<string, string> | null): Parti
         happy: typeof raw.happy === 'string' ? raw.happy : undefined,
         sad: typeof raw.sad === 'string' ? raw.sad : undefined,
         sleepy: typeof raw.sleepy === 'string' ? raw.sleepy : undefined,
+        calm: typeof raw.calm === 'string' ? raw.calm : undefined,
     };
 }
 

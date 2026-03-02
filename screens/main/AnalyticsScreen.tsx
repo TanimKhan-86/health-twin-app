@@ -381,7 +381,7 @@ export default function AnalyticsScreen({ navigation }: AppScreenProps<'Analytic
                                     <Text style={styles.distributionMetaText}>Last 30d tracked days: {dist30.trackedDays}</Text>
                                 </View>
 
-                                {(['happy', 'sad', 'sleepy'] as AvatarState[]).map((state) => {
+                                {(Object.keys(AVATAR_STATE_META) as AvatarState[]).map((state) => {
                                     const meta = AVATAR_STATE_META[state];
                                     const pct7 = dist7.percentages[state];
                                     const pct30 = dist30.percentages[state];

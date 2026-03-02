@@ -1,9 +1,8 @@
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useEffect } from "react";
 import { View, Text, ScrollView, Pressable, Platform, Image, StyleSheet } from "react-native";
 import { ScreenLayout } from "../../components/ScreenLayout";
 import { DigitalTwinAvatar } from "../../components/DigitalTwinAvatar";
 import { Activity, Heart, Moon, Zap } from "lucide-react-native";
-import { useFocusEffect } from "@react-navigation/native";
 import { useAuth } from "../../contexts/AuthContext";
 import { getStreak, getTodayHealth } from "../../lib/api/auth";
 import { apiFetch } from "../../lib/api/client";
@@ -56,9 +55,12 @@ export default function DashboardScreen({ navigation }: AppScreenProps<'Main'>) 
     const [hoveredActionRow, setHoveredActionRow] = useState<string | null>(null);
     const webPointerStyle = Platform.OS === 'web' ? ({ cursor: 'pointer' } as any) : undefined;
 
-    useFocusEffect(useCallback(() => { loadDashboard(); }, []));
+    useEffect(() => {
+        setProfileAvatarUrl(user?.profileImage ?? null);
+        setAvatarKey(`user-${user?.id ?? 'anon'}-${Date.now()}`);
+    }, [user?.id, user?.profileImage]);
 
-    const loadDashboard = async () => {
+    const loadDashboard = useCallback(async () => {
         try {
             const [streakData, health, avatarStatus] = await Promise.all([
                 getStreak(),
@@ -70,7 +72,15 @@ export default function DashboardScreen({ navigation }: AppScreenProps<'Main'>) 
             setProfileAvatarUrl((avatarStatus.success ? avatarStatus.data?.avatarUrl ?? null : null) ?? user?.profileImage ?? null);
             setAvatarKey(Date.now().toString()); // Force avatar refresh
         } catch (e) { console.warn('Dashboard load error:', e); }
-    };
+    }, [user?.id, user?.profileImage]);
+
+    useEffect(() => {
+        void loadDashboard();
+        const unsubscribe = navigation.addListener('focus', () => {
+            void loadDashboard();
+        });
+        return unsubscribe;
+    }, [navigation, loadDashboard]);
 
     const firstName = user?.name?.split(' ')[0] || 'there';
     const greeting = (() => {
@@ -148,7 +158,7 @@ export default function DashboardScreen({ navigation }: AppScreenProps<'Main'>) 
                 {/* Avatar Section */}
                 <FadeInSection delay={40}>
                     <View style={styles.avatarSection}>
-                        <DigitalTwinAvatar key={avatarKey} />
+                        <DigitalTwinAvatar key={avatarKey} showStateLabel />
                     </View>
                 </FadeInSection>
 

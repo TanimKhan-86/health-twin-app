@@ -64,7 +64,12 @@ export function isAvatarBasedAnimation(animation: {
     const animationFingerprint = typeof metadata.avatarFingerprint === 'string' ? metadata.avatarFingerprint : null;
 
     if (avatarFingerprint) {
-        return animationFingerprint === avatarFingerprint;
+        if (animationFingerprint) {
+            return animationFingerprint === avatarFingerprint;
+        }
+        // Legacy/prebuilt records can miss avatarFingerprint metadata after media migrations.
+        // In that case, keep them usable for the same user when provider is prebuilt.
+        return provider.startsWith('prebuilt_');
     }
 
     if (animation.videoUrl.startsWith('data:video/')) return true;
@@ -160,6 +165,7 @@ export function chooseAvatarState(
     const hasState = (state: StateType): boolean => availableStates.includes(state);
     const fallbackSadLike = (): StateType => {
         if (hasState('sad')) return 'sad';
+        if (hasState('calm')) return 'calm';
         return availableStates[0] || 'sad';
     };
 
@@ -202,6 +208,30 @@ export function chooseAvatarState(
         return { state: fallbackSadLike(), reasoning: `Low-energy/stress signal from ${fatigueSignalSource}` };
     }
 
+    const lowStress = stressLevel === 0 || stressLevel <= 4;
+    const calmMoodPreferred = moodName === 'calm' || moodName === 'neutral';
+
+    const calmSignal =
+        moodName === 'calm'
+        || (
+            moodName === 'neutral'
+            && lowStress
+            && (sleepHours === 0 || sleepHours >= 6)
+        )
+        || (
+            lowStress
+            && sleepHours >= 6
+            && sleepHours < 7.5
+            && (energyScore === 0 || (energyScore >= 50 && energyScore < 75))
+            && (moodEnergy === 0 || (moodEnergy >= 5 && moodEnergy <= 7))
+            && (steps === 0 || (steps >= 3500 && steps <= 9000))
+        );
+
+    // If user reports calm/neutral and balance indicators are good, prefer calm over happy.
+    if (calmMoodPreferred && calmSignal && hasState('calm')) {
+        return { state: 'calm', reasoning: 'Calm/neutral mood with balanced low-stress pattern' };
+    }
+
     let positiveSignals = 0;
     if (steps >= 8000) positiveSignals += 1;
     if (sleepHours >= 7) positiveSignals += 1;
@@ -209,8 +239,15 @@ export function chooseAvatarState(
     if (energyScore >= 70) positiveSignals += 1;
     if (moodEnergy >= 7) positiveSignals += 1;
 
-    if (positiveSignals >= 2 && hasState('happy')) {
-        return { state: 'happy', reasoning: `Positive daily metrics (${positiveSignals} strong signals)` };
+    if (positiveSignals >= 3 && lowStress && hasState('happy')) {
+        return {
+            state: 'happy',
+            reasoning: `Strong positive daily metrics (${positiveSignals} signals) with low stress (${stressLevel || 0}/10)`,
+        };
+    }
+
+    if (calmSignal && hasState('calm')) {
+        return { state: 'calm', reasoning: 'Balanced low-stress pattern detected' };
     }
 
     return { state: fallbackSadLike(), reasoning: 'Default low/neutral activity state' };

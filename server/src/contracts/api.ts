@@ -27,7 +27,7 @@ export type MoodType =
     | 'anxious'
     | 'excited';
 
-export type AvatarStateType = 'happy' | 'sad' | 'sleepy' | 'tired';
+export type AvatarStateType = 'happy' | 'sad' | 'sleepy' | 'calm' | 'tired';
 export type AvatarMode = 'prebuilt' | 'nanobana';
 
 export interface AuthUserDto {
@@ -57,6 +57,7 @@ export interface HealthEntryDto {
     energyScore?: number | null;
     weight?: number;
     notes?: string;
+    source?: 'daily_log' | 'health_api' | 'seed_demo' | null;
     createdAt?: string;
     updatedAt?: string;
 }
@@ -69,6 +70,7 @@ export interface MoodEntryDto {
     energyLevel: number;
     stressLevel: number;
     notes?: string;
+    source?: 'daily_log' | 'mood_api' | 'seed_demo' | null;
     createdAt?: string;
     updatedAt?: string;
 }
@@ -89,6 +91,12 @@ export interface SeedDemoResultDto {
     message: string;
     healthEntries: number;
     moodEntries: number;
+}
+
+export interface ClearSeedDemoResultDto {
+    message: string;
+    healthEntriesDeleted: number;
+    moodEntriesDeleted: number;
 }
 
 export interface AvatarStatusDto {
@@ -123,7 +131,7 @@ export interface AvatarLibraryDto {
     availableStates: AvatarStateType[];
 }
 
-export type FutureState = 'happy' | 'sad' | 'sleepy';
+export type FutureState = 'happy' | 'sad' | 'sleepy' | 'calm';
 
 export interface FutureInsightDto {
     period: {

@@ -1,4 +1,4 @@
-export type AvatarState = 'happy' | 'sad' | 'sleepy';
+export type AvatarState = 'happy' | 'sad' | 'sleepy' | 'calm';
 
 export interface HealthEntry {
     date: string;
@@ -40,6 +40,7 @@ export const AVATAR_STATE_META: Record<AvatarState, { label: string; emoji: stri
     happy: { label: 'Happy', emoji: '😄', color: '#16a34a', bg: '#dcfce7' },
     sad: { label: 'Sad', emoji: '😔', color: '#2563eb', bg: '#dbeafe' },
     sleepy: { label: 'Sleepy', emoji: '😴', color: '#7c3aed', bg: '#ede9fe' },
+    calm: { label: 'Calm', emoji: '😌', color: '#0f766e', bg: '#ccfbf1' },
 };
 
 export function avg(arr: number[]): number { return arr.length ? Math.round(arr.reduce((a, b) => a + b, 0) / arr.length) : 0; }
@@ -101,6 +102,26 @@ export function inferAvatarStateFromDay(health?: HealthEntry, mood?: MoodEntry):
 
     if (fatigueSignal) return 'sad';
 
+    const lowStress = stressLevel === 0 || stressLevel <= 4;
+    const calmMoodPreferred = moodName === 'calm' || moodName === 'neutral';
+    const calmSignal =
+        moodName === 'calm'
+        || (
+            moodName === 'neutral'
+            && lowStress
+            && (sleepHours === 0 || sleepHours >= 6)
+        )
+        || (
+            lowStress
+            && sleepHours >= 6
+            && sleepHours < 7.5
+            && (energyScore === 0 || (energyScore >= 50 && energyScore < 75))
+            && (moodEnergy === 0 || (moodEnergy >= 5 && moodEnergy <= 7))
+            && (steps === 0 || (steps >= 3500 && steps <= 9000))
+        );
+
+    if (calmMoodPreferred && calmSignal) return 'calm';
+
     let positiveSignals = 0;
     if (steps >= 8000) positiveSignals += 1;
     if (sleepHours >= 7) positiveSignals += 1;
@@ -108,7 +129,8 @@ export function inferAvatarStateFromDay(health?: HealthEntry, mood?: MoodEntry):
     if (energyScore >= 70) positiveSignals += 1;
     if (moodEnergy >= 7) positiveSignals += 1;
 
-    if (positiveSignals >= 2) return 'happy';
+    if (positiveSignals >= 3 && lowStress) return 'happy';
+    if (calmSignal) return 'calm';
     return 'sad';
 }
 
@@ -118,7 +140,7 @@ export function buildDistribution(
     healthEntries: HealthEntry[],
     moodEntries: MoodEntry[]
 ): DistributionSummary {
-    const counts: Record<AvatarState, number> = { happy: 0, sad: 0, sleepy: 0 };
+    const counts: Record<AvatarState, number> = { happy: 0, sad: 0, sleepy: 0, calm: 0 };
     const startDate = shiftDateString(endDate, -(days - 1));
     const healthInRange = filterByRange(healthEntries, startDate, endDate);
     const moodInRange = filterByRange(moodEntries, startDate, endDate);
@@ -143,6 +165,7 @@ export function buildDistribution(
         happy: trackedDays ? Math.round((counts.happy / trackedDays) * 100) : 0,
         sad: trackedDays ? Math.round((counts.sad / trackedDays) * 100) : 0,
         sleepy: trackedDays ? Math.round((counts.sleepy / trackedDays) * 100) : 0,
+        calm: trackedDays ? Math.round((counts.calm / trackedDays) * 100) : 0,
     };
 
     return { counts, percentages, trackedDays };

@@ -164,7 +164,7 @@ The app supports 2 modes via `server/.env`:
 ### Prebuilt mode flow (no Gemini usage for avatar generation)
 
 1. Keep `AVATAR_MODE=prebuilt` in `server/.env`
-2. Seed pre-generated assets (avatar PNG + `happy/sad/sleepy` MP4 loops) into MongoDB
+2. Seed pre-generated assets (avatar PNG + `happy/sad/sleepy` MP4 loops, optional `calm`) into MongoDB
 3. Dashboard fetches `/api/avatar/state` and loops exactly one state video in the circular frame
 4. State selection updates from daily vitals and mood metrics
 

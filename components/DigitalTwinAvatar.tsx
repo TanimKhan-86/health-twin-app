@@ -5,6 +5,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { apiFetch } from "../lib/api/client";
 import { HealthEntry, MoodEntry } from "../lib/api/auth";
 import { getLocalDateYmd } from "../lib/date/localDay";
+import { useAuth } from "../contexts/AuthContext";
 
 interface AvatarStatePayload {
     state: string;
@@ -46,6 +47,11 @@ const AURA_PRESETS: Record<string, AuraPreset> = {
         glowColor: 'rgba(99, 102, 241, 0.30)',
         frameBg: '#eef2ff',
     },
+    calm: {
+        ringColors: ['#34d399', '#0ea5a4'], // mint/teal
+        glowColor: 'rgba(16, 185, 129, 0.26)',
+        frameBg: '#ecfeff',
+    },
     stressed: {
         ringColors: ['#f59e0b', '#ef4444'], // amber/red
         glowColor: 'rgba(239, 68, 68, 0.24)',
@@ -63,11 +69,29 @@ function getAuraPresetForState(rawState: string | null): AuraPreset {
     if (state === 'happy') return AURA_PRESETS.happy;
     if (state === 'sad') return AURA_PRESETS.sad;
     if (state === 'sleepy') return AURA_PRESETS.sleepy;
+    if (state === 'calm') return AURA_PRESETS.calm;
     if (state === 'stressed' || state === 'tired') return AURA_PRESETS.stressed;
     return AURA_PRESETS.default;
 }
 
-export function DigitalTwinAvatar() {
+interface DigitalTwinAvatarProps {
+    showStateLabel?: boolean;
+}
+
+function getStateLabel(rawState: string | null): string | null {
+    const state = (rawState || '').toLowerCase();
+    if (!state) return null;
+    if (state === 'happy') return 'Happy';
+    if (state === 'sad') return 'Sad';
+    if (state === 'sleepy') return 'Sleepy';
+    if (state === 'calm') return 'Calm';
+    if (state === 'tired') return 'Sleepy';
+    if (state === 'stressed') return 'Stressed';
+    return state.charAt(0).toUpperCase() + state.slice(1);
+}
+
+export function DigitalTwinAvatar({ showStateLabel = false }: DigitalTwinAvatarProps) {
+    const { user } = useAuth();
     const [loading, setLoading] = useState(true);
     const [videoUrl, setVideoUrl] = useState<string | null>(null);
     const [imageUrl, setImageUrl] = useState<string | null>(null);
@@ -79,6 +103,7 @@ export function DigitalTwinAvatar() {
     const hasLoadedRef = useRef(false);
     const videoCacheRef = useRef<Record<string, string>>({});
     const prefetchingStatesRef = useRef<Set<string>>(new Set());
+    const activeUserIdRef = useRef<string | null>(null);
 
     useEffect(() => {
         // Audio API is native-only — skip on web to prevent crash
@@ -94,6 +119,25 @@ export function DigitalTwinAvatar() {
             });
         }
     }, []);
+
+    useEffect(() => {
+        const nextUserId = user?.id ?? null;
+        if (activeUserIdRef.current === nextUserId) return;
+        activeUserIdRef.current = nextUserId;
+
+        // Prevent avatar/media bleed when account changes in the same app session.
+        hasLoadedRef.current = false;
+        videoCacheRef.current = {};
+        prefetchingStatesRef.current.clear();
+        setLoading(true);
+        setVideoUrl(null);
+        setImageUrl(null);
+        setAvatarState(null);
+        setVideoFailed(false);
+        setError(null);
+        setUnavailableReason(null);
+        setUnavailableDetail(null);
+    }, [user?.id]);
 
     useEffect(() => {
         let isMounted = true;
@@ -182,6 +226,12 @@ export function DigitalTwinAvatar() {
                 detail: 'Open Settings > Digital Twin Setup to generate avatar media.',
             };
         }
+        if (lowered.includes('no daily log vitals')) {
+            return {
+                reason: 'no_logs',
+                detail: 'No Daily Log Vitals found for today. Log Daily Vitals first.',
+            };
+        }
 
         try {
             const dayKey = getLocalDateYmd();
@@ -209,7 +259,7 @@ export function DigitalTwinAvatar() {
             if (!hasTodayLogs) {
                 return {
                     reason: 'no_logs',
-                    detail: 'No logs for today yet. Log Daily Vitals or seed demo data.',
+                    detail: 'No logs for today yet. Log Daily Vitals first.',
                 };
             }
 
@@ -306,7 +356,7 @@ export function DigitalTwinAvatar() {
                 hasLoadedRef.current = true;
             }
         }
-    }, [cacheMediaFromPayload, normalizeState, resolveUnavailableReason]);
+    }, [cacheMediaFromPayload, normalizeState, resolveUnavailableReason, user?.id]);
 
     useEffect(() => {
         fetchState();
@@ -347,6 +397,7 @@ export function DigitalTwinAvatar() {
                     ? 'Avatar unavailable'
                     : null;
     const auraPreset = getAuraPresetForState(avatarState);
+    const stateLabel = getStateLabel(avatarState);
 
     if (unavailableReason && !videoUrl && !imageUrl) {
         return renderGlassCard(
@@ -413,6 +464,11 @@ export function DigitalTwinAvatar() {
                 {!!imageUrl && !videoUrl && (
                     <Text className="mt-3 text-center text-xs font-semibold text-slate-500 px-6">
                         {unavailableDetail || 'Video unavailable for now. Showing avatar image fallback.'}
+                    </Text>
+                )}
+                {showStateLabel && stateLabel && (
+                    <Text style={styles.stateLabelText}>
+                        {stateLabel}
                     </Text>
                 )}
                 {error && !unavailableReason && (
@@ -492,5 +548,12 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         borderWidth: 3,
         borderColor: '#ffffff',
+    },
+    stateLabelText: {
+        marginTop: 8,
+        fontSize: 14,
+        fontWeight: '700',
+        color: '#4338ca',
+        textAlign: 'center',
     },
 });

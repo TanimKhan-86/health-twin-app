@@ -20,7 +20,8 @@
       "animations": {
         "happy": "/absolute/path/to/elora-happy.mp4",
         "sad": "/absolute/path/to/elora-sad.mp4",
-        "sleepy": "/absolute/path/to/elora-sleepy.mp4"
+        "sleepy": "/absolute/path/to/elora-sleepy.mp4",
+        "calm": "/absolute/path/to/elora-calm.mp4"
       },
       "durationSeconds": 5
     }

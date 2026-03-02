@@ -8,7 +8,9 @@ const dotenv = require('dotenv');
 
 dotenv.config({ path: path.resolve(__dirname, '../.env') });
 
-const REQUIRED_STATES = ['happy', 'sad', 'sleepy'];
+const BASE_REQUIRED_STATES = ['happy', 'sad', 'sleepy'];
+const OPTIONAL_STATES = ['calm'];
+const SUPPORTED_STATES = [...BASE_REQUIRED_STATES, ...OPTIONAL_STATES];
 const DEFAULT_CONFIG_PATH = path.resolve(__dirname, 'prebuilt-avatar-seed.json');
 
 function parseArgs(argv) {
@@ -78,30 +80,36 @@ function ensureRequiredStateFiles(userEntry) {
     if (!userEntry.animations || typeof userEntry.animations !== 'object') {
         throw new Error('Missing "animations" object');
     }
-    for (const state of REQUIRED_STATES) {
+    for (const state of BASE_REQUIRED_STATES) {
         if (!userEntry.animations[state]) {
             throw new Error(`Missing animations.${state} path`);
+        }
+    }
+    for (const state of Object.keys(userEntry.animations)) {
+        if (!SUPPORTED_STATES.includes(state)) {
+            throw new Error(`Unsupported animations.${state} (allowed: ${SUPPORTED_STATES.join(', ')})`);
         }
     }
 }
 
 async function findUser(usersCollection, userEntry) {
-    const filters = [];
-    if (typeof userEntry.email === 'string' && userEntry.email.trim()) {
-        filters.push({ email: userEntry.email.trim().toLowerCase() });
-    }
-    if (typeof userEntry.name === 'string' && userEntry.name.trim()) {
-        filters.push({ name: new RegExp(`^${escapeRegex(userEntry.name.trim())}$`, 'i') });
-    }
+    const normalizedEmail = typeof userEntry.email === 'string' && userEntry.email.trim()
+        ? userEntry.email.trim().toLowerCase()
+        : null;
+    const normalizedName = typeof userEntry.name === 'string' && userEntry.name.trim()
+        ? userEntry.name.trim()
+        : null;
 
-    if (filters.length === 0) {
+    if (!normalizedEmail && !normalizedName) {
         throw new Error('Each user requires at least one identity field: email or name');
     }
 
-    if (filters.length === 1) {
-        return usersCollection.findOne(filters[0]);
+    // Safety: if an email is provided, only match by email to avoid cross-user overwrites.
+    if (normalizedEmail) {
+        return usersCollection.findOne({ email: normalizedEmail });
     }
-    return usersCollection.findOne({ $or: filters });
+
+    return usersCollection.findOne({ name: new RegExp(`^${escapeRegex(normalizedName)}$`, 'i') });
 }
 
 function formatIdentity(userEntry) {
@@ -136,8 +144,9 @@ async function seedUser({
         throw new Error(`Profile photo file not found: ${profilePath}`);
     }
 
+    const statesToSeed = SUPPORTED_STATES.filter((state) => typeof userEntry.animations[state] === 'string' && !!userEntry.animations[state]);
     const animationAssets = {};
-    for (const state of REQUIRED_STATES) {
+    for (const state of statesToSeed) {
         const videoPath = resolvePath(userEntry.animations[state], configDir);
         animationAssets[state] = {
             path: videoPath,
@@ -157,7 +166,7 @@ async function seedUser({
     if (dryRun) {
         console.log(`- [DRY RUN] ${identity} -> userId=${dbUser._id}`);
         console.log(`  avatar: ${avatarPath} (${Math.round(avatarAsset.bytes / 1024)}KB)`);
-        console.log(`  states: ${REQUIRED_STATES.join(', ')} | duration=${durationSeconds}s`);
+        console.log(`  states: ${statesToSeed.join(', ')} | duration=${durationSeconds}s`);
         return { updated: true };
     }
 
@@ -182,7 +191,7 @@ async function seedUser({
                     mode: 'prebuilt',
                     avatarFingerprint,
                     stylePreset: userEntry.stylePreset || 'prebuilt_demo_style_v1',
-                    statesRequested: REQUIRED_STATES,
+                    statesRequested: statesToSeed,
                     source: 'local_prebuilt_assets',
                     sourceAvatarPath: avatarPath,
                     sourceProfilePhotoPath: profilePath,
@@ -197,7 +206,7 @@ async function seedUser({
         { upsert: true }
     );
 
-    for (const state of REQUIRED_STATES) {
+    for (const state of statesToSeed) {
         const asset = animationAssets[state];
         await animationsCollection.updateOne(
             { userId: dbUser._id, stateType: state },
@@ -231,7 +240,7 @@ async function seedUser({
 
     await animationsCollection.deleteMany({
         userId: dbUser._id,
-        stateType: { $nin: REQUIRED_STATES },
+        stateType: { $nin: statesToSeed },
     });
 
     console.log(`- Seeded ${identity} -> userId=${dbUser._id}`);
