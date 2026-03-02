@@ -1,16 +1,42 @@
 import { Router, Response } from 'express';
 import crypto from 'crypto';
+import { z } from 'zod';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import HealthEntry from '../models/HealthEntry';
 import MoodEntry from '../models/MoodEntry';
 import { Avatar } from '../models/Avatar';
 import { AvatarAnimation } from '../models/AvatarAnimation';
+import { getUtcDayKey, shiftUtcDays, toUtcDayStart } from '../lib/dateUtils';
+import { getErrorMessage, sendError, sendSuccess } from '../lib/apiResponse';
+import { parseQuery, QUERY_LIMITS } from '../lib/validation';
 
 type FutureState = 'happy' | 'sad' | 'sleepy';
 
+interface HealthSignal {
+    date: Date;
+    sleepHours?: number;
+    heartRate?: number;
+    steps?: number;
+    waterLitres?: number;
+    energyScore?: number;
+}
+
+interface MoodSignal {
+    date: Date;
+    mood?: string;
+    energyLevel?: number;
+    stressLevel?: number;
+}
+
+interface AvatarAnimationSignal {
+    stateType: FutureState;
+    videoUrl?: string;
+    generationMetadata?: unknown;
+}
+
 interface StateSignalContext {
-    health?: any | null;
-    mood?: any | null;
+    health?: HealthSignal | null;
+    mood?: MoodSignal | null;
 }
 
 interface InferredState {
@@ -22,19 +48,14 @@ const FUTURE_STATES: FutureState[] = ['happy', 'sad', 'sleepy'];
 const router = Router();
 router.use(authenticate);
 
-function dayKeyLocal(input: Date): string {
-    const date = new Date(input);
-    const y = date.getFullYear();
-    const m = String(date.getMonth() + 1).padStart(2, '0');
-    const d = String(date.getDate()).padStart(2, '0');
-    return `${y}-${m}-${d}`;
-}
-
-function startOfTodayLocal(): Date {
-    const date = new Date();
-    date.setHours(0, 0, 0, 0);
-    return date;
-}
+const insightQuerySchema = z.object({
+    days: z.coerce
+        .number()
+        .int()
+        .min(QUERY_LIMITS.futureDays.min)
+        .max(QUERY_LIMITS.futureDays.max)
+        .default(QUERY_LIMITS.futureDays.default),
+});
 
 function computeAvatarFingerprint(avatarImageUrl: string): string {
     return crypto.createHash('sha256').update(avatarImageUrl).digest('hex');
@@ -110,14 +131,15 @@ function selectTopState(
     return winners[0] || 'sad';
 }
 
-function isUsableAnimation(animation: any, avatarFingerprint?: string | null): boolean {
-    const videoUrl = typeof animation?.videoUrl === 'string' ? animation.videoUrl : null;
+function safeMetadata(value: unknown): Record<string, unknown> {
+    return value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
+}
+
+function isUsableAnimation(animation: AvatarAnimationSignal, avatarFingerprint?: string | null): boolean {
+    const videoUrl = typeof animation.videoUrl === 'string' ? animation.videoUrl : null;
     if (!videoUrl) return false;
 
-    const metadata = animation?.generationMetadata && typeof animation.generationMetadata === 'object'
-        ? animation.generationMetadata
-        : {};
-
+    const metadata = safeMetadata(animation.generationMetadata);
     const provider = typeof metadata.provider === 'string' ? metadata.provider : '';
     const animationFingerprint = typeof metadata.avatarFingerprint === 'string' ? metadata.avatarFingerprint : null;
 
@@ -129,44 +151,54 @@ function isUsableAnimation(animation: any, avatarFingerprint?: string | null): b
 }
 
 router.get('/insight', async (req: AuthRequest, res: Response): Promise<void> => {
+    const query = parseQuery(res, insightQuerySchema, req.query);
+    if (!query) return;
+
     try {
         const userId = req.userId;
         if (!userId) {
-            res.status(401).json({ success: false, error: 'Unauthorized' });
+            sendError(res, 401, 'Unauthorized');
             return;
         }
 
-        const requestedDays = Math.max(1, Math.min(30, parseInt(req.query.days as string, 10) || 7));
-        const today = startOfTodayLocal();
-        const since = new Date(today);
-        since.setDate(today.getDate() - (requestedDays - 1));
+        const today = toUtcDayStart();
+        const since = shiftUtcDays(today, -(query.days - 1));
+        const tomorrow = shiftUtcDays(today, 1);
 
         const [healthEntries, moodEntries, latestHealth, latestMood, avatar, animations] = await Promise.all([
-            HealthEntry.find({ userId, date: { $gte: since } }).sort({ date: 1, updatedAt: 1, createdAt: 1 }),
-            MoodEntry.find({ userId, date: { $gte: since } }).sort({ date: 1, updatedAt: 1, createdAt: 1 }),
-            HealthEntry.findOne({ userId }).sort({ date: -1, updatedAt: -1, createdAt: -1 }),
-            MoodEntry.findOne({ userId }).sort({ date: -1, updatedAt: -1, createdAt: -1 }),
-            Avatar.findOne({ userId }),
-            AvatarAnimation.find({ userId, stateType: { $in: FUTURE_STATES } }),
+            HealthEntry.find({ userId, date: { $gte: since, $lt: tomorrow } })
+                .sort({ date: 1, updatedAt: 1, createdAt: 1 })
+                .lean<HealthSignal[]>(),
+            MoodEntry.find({ userId, date: { $gte: since, $lt: tomorrow } })
+                .sort({ date: 1, updatedAt: 1, createdAt: 1 })
+                .lean<MoodSignal[]>(),
+            HealthEntry.findOne({ userId })
+                .sort({ date: -1, updatedAt: -1, createdAt: -1 })
+                .lean<HealthSignal | null>(),
+            MoodEntry.findOne({ userId })
+                .sort({ date: -1, updatedAt: -1, createdAt: -1 })
+                .lean<MoodSignal | null>(),
+            Avatar.findOne({ userId }).lean<{ avatarImageUrl?: string } | null>(),
+            AvatarAnimation.find({ userId, stateType: { $in: FUTURE_STATES } })
+                .lean<AvatarAnimationSignal[]>(),
         ]);
 
-        const healthByDay = new Map<string, any>();
+        const healthByDay = new Map<string, HealthSignal>();
         for (const entry of healthEntries) {
-            healthByDay.set(dayKeyLocal(entry.date), entry);
+            healthByDay.set(getUtcDayKey(entry.date), entry);
         }
 
-        const moodByDay = new Map<string, any>();
+        const moodByDay = new Map<string, MoodSignal>();
         for (const entry of moodEntries) {
-            moodByDay.set(dayKeyLocal(entry.date), entry);
+            moodByDay.set(getUtcDayKey(entry.date), entry);
         }
 
         const dailyStates: Array<{ date: string; state: FutureState | null; reason: string | null }> = [];
         const stateBreakdown: Record<FutureState, number> = { happy: 0, sad: 0, sleepy: 0 };
 
-        for (let i = 0; i < requestedDays; i += 1) {
-            const day = new Date(since);
-            day.setDate(since.getDate() + i);
-            const key = dayKeyLocal(day);
+        for (let i = 0; i < query.days; i += 1) {
+            const day = shiftUtcDays(since, i);
+            const key = getUtcDayKey(day);
             const health = healthByDay.get(key) || null;
             const mood = moodByDay.get(key) || null;
 
@@ -199,14 +231,16 @@ router.get('/insight', async (req: AuthRequest, res: Response): Promise<void> =>
 
         const insight = analyzedDays === 0
             ? 'No 7-day activity data found yet. Seed demo data first, then Future You can project a trend.'
-            : `In the last ${requestedDays} days, "${dominantState}" was dominant (${dominantPercent}% of tracked days). If your current pattern continues, you are likely to feel "${projectedState}" most of the time from next week onward.`;
+            : `In the last ${query.days} days, "${dominantState}" was dominant (${dominantPercent}% of tracked days). If your current pattern continues, you are likely to feel "${projectedState}" most of the time from next week onward.`;
 
         const avatarFingerprint = avatar?.avatarImageUrl ? computeAvatarFingerprint(avatar.avatarImageUrl) : null;
-        const usableAnimations = animations.filter((anim) => isUsableAnimation(anim, avatarFingerprint));
-        const animationMap = usableAnimations.reduce((acc, anim) => {
-            acc[anim.stateType as FutureState] = anim.videoUrl;
+        const usableAnimations = animations.filter((animation) => isUsableAnimation(animation, avatarFingerprint));
+        const animationMap = usableAnimations.reduce<Partial<Record<FutureState, string>>>((acc, animation) => {
+            if (animation.videoUrl) {
+                acc[animation.stateType] = animation.videoUrl;
+            }
             return acc;
-        }, {} as Record<FutureState, string>);
+        }, {});
 
         const projectedVideoUrl =
             animationMap[projectedState]
@@ -216,39 +250,36 @@ router.get('/insight', async (req: AuthRequest, res: Response): Promise<void> =>
             || animationMap.sleepy
             || null;
 
-        res.json({
-            success: true,
-            data: {
-                period: {
-                    days: requestedDays,
-                    from: since,
-                    to: today,
-                },
-                hasSevenDayData: analyzedDays > 0,
-                analyzedDays,
-                dominantState,
-                currentState,
-                projectedState,
-                stateBreakdown,
-                dailyStates,
-                reasoning: {
-                    dominant: dominantDays > 0
-                        ? `${dominantState} appeared on ${dominantDays}/${analyzedDays} tracked days`
-                        : 'No dominant state yet (insufficient data)',
-                    current: currentInferred.reason,
-                    projection: `Projection weights combine 7-day dominance + current-day behavior continuity`,
-                },
-                insight,
-                media: {
-                    imageUrl: avatar?.avatarImageUrl ?? null,
-                    projectedVideoUrl,
-                    availableStates: Object.keys(animationMap),
-                },
+        sendSuccess(res, {
+            period: {
+                days: query.days,
+                from: since,
+                to: today,
+            },
+            hasSevenDayData: analyzedDays > 0,
+            analyzedDays,
+            dominantState,
+            currentState,
+            projectedState,
+            stateBreakdown,
+            dailyStates,
+            reasoning: {
+                dominant: dominantDays > 0
+                    ? `${dominantState} appeared on ${dominantDays}/${analyzedDays} tracked days`
+                    : 'No dominant state yet (insufficient data)',
+                current: currentInferred.reason,
+                projection: 'Projection weights combine 7-day dominance + current-day behavior continuity',
+            },
+            insight,
+            media: {
+                imageUrl: avatar?.avatarImageUrl ?? null,
+                projectedVideoUrl,
+                availableStates: Object.keys(animationMap),
             },
         });
-    } catch (error) {
+    } catch (error: unknown) {
         console.error('Future insight error:', error);
-        res.status(500).json({ success: false, error: 'Failed to analyze future insight' });
+        sendError(res, 500, `Failed to analyze future insight: ${getErrorMessage(error)}`);
     }
 });
 

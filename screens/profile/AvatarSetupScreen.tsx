@@ -7,8 +7,10 @@ import * as ImagePicker from 'expo-image-picker';
 import { apiFetch, getToken } from "../../lib/api/client";
 import { useToast } from "../../components/ui/Toast";
 import { useAuth } from "../../contexts/AuthContext";
+import type { AppScreenProps } from "../../lib/navigation/types";
+import type { ApiEnvelope } from "../../lib/api/contracts";
 
-export default function AvatarSetupScreen({ navigation }: any) {
+export default function AvatarSetupScreen({ navigation }: AppScreenProps<'AvatarSetup'>) {
     const { user } = useAuth();
     const { showToast } = useToast();
     const [photoUri, setPhotoUri] = useState<string | null>(null);
@@ -82,7 +84,7 @@ export default function AvatarSetupScreen({ navigation }: any) {
                         uri: photoUri,
                         name: 'avatar.jpg',
                         type: 'image/jpeg',
-                    } as any);
+                    } as unknown as Blob);
                 }
 
                 res = await fetch(`${API_URL}/api/avatar/setup`, {
@@ -102,15 +104,29 @@ export default function AvatarSetupScreen({ navigation }: any) {
                 });
             }
 
-            let data: any = null;
+            let data: ApiEnvelope<{
+                message?: string;
+                mode?: 'prebuilt' | 'nanobana';
+                ready?: boolean;
+                requiredStates?: string[];
+            }> | null = null;
             try {
-                data = await res.json();
+                data = (await res.json()) as ApiEnvelope<{
+                    message?: string;
+                    mode?: 'prebuilt' | 'nanobana';
+                    ready?: boolean;
+                    requiredStates?: string[];
+                }>;
             } catch {
                 throw new Error(`Avatar setup failed (${res.status})`);
             }
-            if (!res.ok || !data?.success) throw new Error(data?.error || `Avatar setup failed (${res.status})`);
+            if (!res.ok || !data || !data.success) {
+                const errorMessage = data && !data.success ? data.error : `Avatar setup failed (${res.status})`;
+                throw new Error(errorMessage);
+            }
+            const payload = data.data;
 
-            const backendMessage = data?.data?.message || data?.message || '';
+            const backendMessage = payload?.message || '';
             showToast(
                 backendMessage || (
                     usingProfileImageFallback
@@ -120,20 +136,19 @@ export default function AvatarSetupScreen({ navigation }: any) {
                 'success'
             );
             setSuccess(true);
-            const nextStates: string[] = data?.data?.requiredStates || requiredStates;
+            const nextStates: string[] = payload?.requiredStates || requiredStates;
             setRequiredStates(nextStates);
-            if (data?.data?.mode) {
-                setAvatarMode(data.data.mode);
+            if (payload?.mode) {
+                setAvatarMode(payload.mode);
             }
             setStatusHint(
-                data?.data?.ready
+                payload?.ready
                     ? `${nextStates.join(', ')} loops are ready.`
                     : backendMessage || 'Avatar setup completed.'
             );
-            setTimeout(() => navigation.goBack(), 1800);
 
-        } catch (e: any) {
-            showToast(e.message || 'Error generating avatar', 'error');
+        } catch (e: unknown) {
+            showToast(e instanceof Error ? e.message : 'Error generating avatar', 'error');
         } finally {
             setLoading(false);
         }
@@ -213,6 +228,9 @@ export default function AvatarSetupScreen({ navigation }: any) {
                                 <CheckCircle size={48} color="#10b981" />
                                 <Text style={styles.successText}>Twin Activated!</Text>
                                 <Text style={styles.successSub}>Your dashboard can now auto-switch between {requiredStates.join(', ')} loops.</Text>
+                                <TouchableOpacity onPress={() => navigation.navigate('Main')} style={styles.successCtaBtn}>
+                                    <Text style={styles.successCtaText}>Go to Dashboard</Text>
+                                </TouchableOpacity>
                             </View>
                         )}
                     </View>
@@ -244,4 +262,6 @@ const styles = StyleSheet.create({
     successContainer: { alignItems: 'center', paddingVertical: 10 },
     successText: { marginTop: 12, fontSize: 20, fontWeight: '800', color: '#10b981' },
     successSub: { fontSize: 14, color: '#64748b', textAlign: 'center', marginTop: 4 },
+    successCtaBtn: { marginTop: 16, backgroundColor: '#2563eb', borderRadius: 14, paddingHorizontal: 20, paddingVertical: 12 },
+    successCtaText: { color: '#fff', fontWeight: '700', fontSize: 14 },
 });

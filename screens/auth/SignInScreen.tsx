@@ -9,24 +9,32 @@ import { CircuitBoard } from "lucide-react-native";
 import { useAuth } from "../../contexts/AuthContext";
 import { LinearGradient } from "expo-linear-gradient";
 import { TextInput } from "react-native";
+import type { AppScreenProps } from "../../lib/navigation/types";
 
-export default function SignInScreen({ navigation }: any) {
+export default function SignInScreen({ navigation }: AppScreenProps<'SignIn'>) {
     const { login } = useAuth();
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
+    const [showPassword, setShowPassword] = useState(false);
+    const [touched, setTouched] = useState({ email: false, password: false });
     const [isLoading, setIsLoading] = useState(false);
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
+    const normalizedEmail = email.trim().toLowerCase();
+    const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail);
+    const passwordValid = password.length >= 6;
+    const canSubmit = emailValid && passwordValid && !isLoading;
 
     const handleLogin = async () => {
         setErrorMsg(null);
-        if (!email || !password) {
-            setErrorMsg("Please enter both email and password.");
+        setTouched({ email: true, password: true });
+        if (!emailValid || !passwordValid) {
+            setErrorMsg("Please enter a valid email and a password with at least 6 characters.");
             return;
         }
         setIsLoading(true);
         try {
-            const cleanEmail = email.trim().toLowerCase();
-            const cleanPassword = password.trim();
+            const cleanEmail = normalizedEmail;
+            const cleanPassword = password;
             const user = await login(cleanEmail, cleanPassword);
             if (!user) {
                 setErrorMsg("Invalid email or password.");
@@ -53,6 +61,7 @@ export default function SignInScreen({ navigation }: any) {
             <View style={styles.card}>
                 <Text style={styles.cardTitle}>Welcome Back</Text>
                 <Text style={styles.cardSubtitle}>Sign in to your account</Text>
+                <Text style={styles.authModeNote}>Prototype mode: email/password sign-in only.</Text>
 
                 {errorMsg ? (
                     <View style={styles.errorBox}>
@@ -61,32 +70,59 @@ export default function SignInScreen({ navigation }: any) {
                 ) : null}
 
                 <TextInput
-                    style={styles.input}
+                    style={[
+                        styles.input,
+                        touched.email ? (emailValid ? styles.inputValid : styles.inputInvalid) : null,
+                    ]}
                     placeholder="Email"
                     placeholderTextColor="#a78bfa"
                     value={email}
-                    onChangeText={setEmail}
+                    onChangeText={(value) => {
+                        setEmail(value);
+                        if (errorMsg) setErrorMsg(null);
+                    }}
+                    onBlur={() => setTouched((prev) => ({ ...prev, email: true }))}
                     autoCapitalize="none"
                     keyboardType="email-address"
                 />
-                <TextInput
-                    style={styles.input}
-                    placeholder="Password"
-                    placeholderTextColor="#a78bfa"
-                    value={password}
-                    onChangeText={setPassword}
-                    secureTextEntry
-                />
+                {touched.email && (
+                    <Text style={emailValid ? styles.validHint : styles.invalidHint}>
+                        {emailValid ? "Looks good." : "Enter a valid email address."}
+                    </Text>
+                )}
 
-                <TouchableOpacity style={styles.forgotWrap}>
-                    <Text style={styles.forgotText}>Forgot Password?</Text>
-                </TouchableOpacity>
+                <View style={styles.passwordWrap}>
+                    <TextInput
+                        style={[
+                            styles.input,
+                            styles.passwordInput,
+                            touched.password ? (passwordValid ? styles.inputValid : styles.inputInvalid) : null,
+                        ]}
+                        placeholder="Password"
+                        placeholderTextColor="#a78bfa"
+                        value={password}
+                        onChangeText={(value) => {
+                            setPassword(value);
+                            if (errorMsg) setErrorMsg(null);
+                        }}
+                        onBlur={() => setTouched((prev) => ({ ...prev, password: true }))}
+                        secureTextEntry={!showPassword}
+                    />
+                    <TouchableOpacity style={styles.eyeBtn} onPress={() => setShowPassword((prev) => !prev)}>
+                        <Text style={styles.eyeBtnText}>{showPassword ? "Hide" : "Show"}</Text>
+                    </TouchableOpacity>
+                </View>
+                {touched.password && (
+                    <Text style={passwordValid ? styles.validHint : styles.invalidHint}>
+                        {passwordValid ? "Password length is valid." : "Password must be at least 6 characters."}
+                    </Text>
+                )}
 
-                <TouchableOpacity onPress={handleLogin} disabled={isLoading} activeOpacity={0.85}>
+                <TouchableOpacity onPress={handleLogin} disabled={!canSubmit} activeOpacity={0.85}>
                     <LinearGradient
-                        colors={["#7c3aed", "#6d28d9"]}
+                        colors={canSubmit ? ["#7c3aed", "#6d28d9"] : ["#c4b5fd", "#a78bfa"]}
                         start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
-                        style={styles.primaryBtn}
+                        style={[styles.primaryBtn, !canSubmit && styles.primaryBtnDisabled]}
                     >
                         {isLoading
                             ? <ActivityIndicator color="#fff" />
@@ -95,15 +131,6 @@ export default function SignInScreen({ navigation }: any) {
                     </LinearGradient>
                 </TouchableOpacity>
 
-                <View style={styles.dividerRow}>
-                    <View style={styles.divLine} />
-                    <Text style={styles.divText}>Or continue with</Text>
-                    <View style={styles.divLine} />
-                </View>
-
-                <TouchableOpacity style={styles.googleBtn}>
-                    <Text style={styles.googleBtnText}>🌐  Continue with Google</Text>
-                </TouchableOpacity>
             </View>
 
             <View style={styles.bottomRow}>
@@ -150,6 +177,7 @@ const styles = StyleSheet.create({
     },
     cardTitle: { fontSize: 22, fontWeight: '800', color: '#1e1b4b', textAlign: 'center' },
     cardSubtitle: { fontSize: 13, color: '#7c3aed', textAlign: 'center', marginTop: 4, marginBottom: 24 },
+    authModeNote: { marginTop: -12, marginBottom: 16, fontSize: 12, color: '#6b7280', textAlign: 'center' },
 
     errorBox: { backgroundColor: '#fee2e2', padding: 12, borderRadius: 12, marginBottom: 16, borderWidth: 1, borderColor: '#fca5a5' },
     errorText: { color: '#dc2626', fontSize: 14, textAlign: 'center', fontWeight: '500' },
@@ -165,8 +193,47 @@ const styles = StyleSheet.create({
         color: '#1e1b4b',
         marginBottom: 12,
     },
-    forgotWrap: { alignItems: 'flex-end', marginBottom: 20 },
-    forgotText: { color: '#7c3aed', fontSize: 13, fontWeight: '600' },
+    inputValid: {
+        borderColor: '#34d399',
+    },
+    inputInvalid: {
+        borderColor: '#f87171',
+    },
+    validHint: {
+        marginTop: -8,
+        marginBottom: 10,
+        fontSize: 12,
+        color: '#059669',
+        fontWeight: '600',
+    },
+    invalidHint: {
+        marginTop: -8,
+        marginBottom: 10,
+        fontSize: 12,
+        color: '#dc2626',
+        fontWeight: '600',
+    },
+    passwordWrap: {
+        position: 'relative',
+    },
+    passwordInput: {
+        paddingRight: 74,
+        marginBottom: 12,
+    },
+    eyeBtn: {
+        position: 'absolute',
+        right: 12,
+        top: 13,
+        paddingHorizontal: 8,
+        paddingVertical: 6,
+        borderRadius: 10,
+        backgroundColor: '#ede9fe',
+    },
+    eyeBtnText: {
+        color: '#6d28d9',
+        fontSize: 12,
+        fontWeight: '700',
+    },
 
     primaryBtn: {
         borderRadius: 16, paddingVertical: 16,
@@ -174,18 +241,10 @@ const styles = StyleSheet.create({
         shadowColor: '#6d28d9', shadowOffset: { width: 0, height: 4 },
         shadowOpacity: 0.35, shadowRadius: 12, elevation: 6,
     },
-    primaryBtnText: { color: '#ffffff', fontSize: 16, fontWeight: '700', letterSpacing: 0.3 },
-
-    dividerRow: { flexDirection: 'row', alignItems: 'center', marginVertical: 20 },
-    divLine: { flex: 1, height: 1, backgroundColor: '#e9d5ff' },
-    divText: { marginHorizontal: 12, color: '#a78bfa', fontSize: 12, fontWeight: '600' },
-
-    googleBtn: {
-        borderWidth: 1.5, borderColor: '#e9d5ff',
-        borderRadius: 14, paddingVertical: 14,
-        alignItems: 'center',
+    primaryBtnDisabled: {
+        shadowOpacity: 0.08,
     },
-    googleBtnText: { color: '#4c1d95', fontSize: 15, fontWeight: '600' },
+    primaryBtnText: { color: '#ffffff', fontSize: 16, fontWeight: '700', letterSpacing: 0.3 },
 
     bottomRow: { flexDirection: 'row', justifyContent: 'center', marginTop: 28 },
     bottomText: { color: '#5b21b6', fontSize: 14 },

@@ -2,17 +2,10 @@ import React, { createContext, useContext, useEffect, useState, ReactNode } from
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getToken, removeToken, setToken } from '../lib/api/client';
 import { apiFetch } from '../lib/api/client';
+import type { AuthSessionDto, AuthUserDto } from '../lib/api/contracts';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-export interface AuthUser {
-    id: string;
-    name: string;
-    email: string;
-    age?: number;
-    heightCm?: number;
-    weightKg?: number;
-    profileImage?: string;
-}
+export type AuthUser = AuthUserDto;
 
 interface AuthContextValue {
     user: AuthUser | null;
@@ -99,7 +92,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
         password: string,
         profile?: { age?: number; heightCm?: number; weightKg?: number; profileImage?: string }
     ): Promise<AuthUser | null> => {
-        const res = await apiFetch<{ token: string; user: AuthUser }>('/api/auth/register', {
+        const res = await apiFetch<AuthSessionDto>('/api/auth/register', {
             method: 'POST',
             body: JSON.stringify({ name, email, password, ...profile }),
         });
@@ -110,13 +103,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
             return completeRegistration(res.data.token, res.data.user, !!profile?.profileImage);
         }
 
-        // Sometimes the backend sends token at root level due to client.ts spread
-        const rawRes = res as any;
-        if (res.success && rawRes.token && rawRes.user) {
-            return completeRegistration(rawRes.token, rawRes.user, !!profile?.profileImage);
-        }
-
-        console.error('[AuthContext] Register failed. Success:', res.success, 'Error:', res.error);
+        const registerError = res.success ? 'Unknown register error' : res.error;
+        console.error('[AuthContext] Register failed. Success:', res.success, 'Error:', registerError);
         return null;
     };
 
@@ -124,7 +112,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     // ─── Login ──────────────────────────────────────────────────────────────────
     const login = async (email: string, password: string): Promise<AuthUser | null> => {
         console.log(`[AuthContext] Sending Login... Email: '${email}'`);
-        const res = await apiFetch<{ token: string; user: AuthUser }>('/api/auth/login', {
+        const res = await apiFetch<AuthSessionDto>('/api/auth/login', {
             method: 'POST',
             body: JSON.stringify({ email, password }),
         });
@@ -136,14 +124,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
             return res.data.user;
         }
 
-        // Fallback for flat structure
-        const rawRes = res as any;
-        if (res.success && rawRes.token && rawRes.user) {
-            await persistSession(rawRes.token, rawRes.user);
-            return rawRes.user;
-        }
-
-        console.error('[AuthContext] Login failed. Success:', res.success, 'Error:', res.error);
+        const loginError = res.success ? 'Unknown login error' : res.error;
+        console.error('[AuthContext] Login failed. Success:', res.success, 'Error:', loginError);
         return null;
     };
 

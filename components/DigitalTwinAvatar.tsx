@@ -1,7 +1,10 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { View, Text, ActivityIndicator, Platform, Image } from "react-native";
+import { View, Text, ActivityIndicator, Platform, Image, StyleSheet } from "react-native";
 import { Video, ResizeMode, InterruptionModeAndroid, InterruptionModeIOS, Audio } from "expo-av";
+import { LinearGradient } from "expo-linear-gradient";
 import { apiFetch } from "../lib/api/client";
+import { HealthEntry, MoodEntry } from "../lib/api/auth";
+import { getLocalDateYmd } from "../lib/date/localDay";
 
 interface AvatarStatePayload {
     state: string;
@@ -10,12 +13,66 @@ interface AvatarStatePayload {
     reasoning?: string;
 }
 
+interface AvatarStatusPayload {
+    hasAvatar?: boolean;
+    ready?: boolean;
+    pendingStates?: string[];
+}
+
+type UnavailableReason = 'setup_required' | 'seed_required' | 'no_logs' | 'media_unavailable';
+
+type AuraPreset = {
+    ringColors: [string, string];
+    glowColor: string;
+    frameBg: string;
+};
+
+const AURA_PRESETS: Record<string, AuraPreset> = {
+    happy: {
+        ringColors: ['#fbbf24', '#f97316'], // warm
+        glowColor: 'rgba(251, 191, 36, 0.30)',
+        frameBg: '#fff7ed',
+    },
+    sad: {
+        ringColors: ['#67e8f9', '#2563eb'], // cool
+        glowColor: 'rgba(59, 130, 246, 0.28)',
+        frameBg: '#eff6ff',
+    },
+    sleepy: {
+        ringColors: ['#8b5cf6', '#4f46e5'], // indigo
+        glowColor: 'rgba(99, 102, 241, 0.30)',
+        frameBg: '#eef2ff',
+    },
+    stressed: {
+        ringColors: ['#f59e0b', '#ef4444'], // amber/red
+        glowColor: 'rgba(239, 68, 68, 0.24)',
+        frameBg: '#fff7ed',
+    },
+    default: {
+        ringColors: ['#a78bfa', '#7c3aed'],
+        glowColor: 'rgba(124, 58, 237, 0.22)',
+        frameBg: '#ede9fe',
+    },
+};
+
+function getAuraPresetForState(rawState: string | null): AuraPreset {
+    const state = (rawState || '').toLowerCase();
+    if (state === 'happy') return AURA_PRESETS.happy;
+    if (state === 'sad') return AURA_PRESETS.sad;
+    if (state === 'sleepy') return AURA_PRESETS.sleepy;
+    if (state === 'stressed' || state === 'tired') return AURA_PRESETS.stressed;
+    return AURA_PRESETS.default;
+}
+
 export function DigitalTwinAvatar() {
     const [loading, setLoading] = useState(true);
     const [videoUrl, setVideoUrl] = useState<string | null>(null);
     const [imageUrl, setImageUrl] = useState<string | null>(null);
+    const [avatarState, setAvatarState] = useState<string | null>(null);
     const [videoFailed, setVideoFailed] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [unavailableReason, setUnavailableReason] = useState<UnavailableReason | null>(null);
+    const [unavailableDetail, setUnavailableDetail] = useState<string | null>(null);
     const hasLoadedRef = useRef(false);
 
     useEffect(() => {
@@ -33,15 +90,80 @@ export function DigitalTwinAvatar() {
         }
     }, []);
 
+    const resolveUnavailableReason = useCallback(async (sourceMessage?: string): Promise<{ reason: UnavailableReason; detail: string }> => {
+        const lowered = (sourceMessage || '').toLowerCase();
+        if (lowered.includes('no avatar setup')) {
+            return {
+                reason: 'setup_required',
+                detail: 'Open Settings > Digital Twin Setup to generate avatar media.',
+            };
+        }
+
+        try {
+            const dayKey = getLocalDateYmd();
+            const [statusRes, todayHealthRes, todayMoodRes] = await Promise.all([
+                apiFetch<AvatarStatusPayload>('/api/avatar/status'),
+                apiFetch<HealthEntry | null>(`/api/health/today?date=${encodeURIComponent(dayKey)}`),
+                apiFetch<MoodEntry | null>(`/api/mood/today?date=${encodeURIComponent(dayKey)}`),
+            ]);
+
+            const hasAvatar = !!(statusRes.success && statusRes.data?.hasAvatar);
+            const ready = !!(statusRes.success && statusRes.data?.ready);
+            const pendingStates = statusRes.success && Array.isArray(statusRes.data?.pendingStates)
+                ? statusRes.data.pendingStates
+                : [];
+            const hasTodayLogs = !!(todayHealthRes.success && todayHealthRes.data)
+                || !!(todayMoodRes.success && todayMoodRes.data);
+
+            if (!hasAvatar) {
+                return {
+                    reason: 'setup_required',
+                    detail: 'Open Settings > Digital Twin Setup to generate avatar media.',
+                };
+            }
+
+            if (!hasTodayLogs) {
+                return {
+                    reason: 'no_logs',
+                    detail: 'No logs for today yet. Log Daily Vitals or seed demo data.',
+                };
+            }
+
+            if (!ready) {
+                const missingStates = pendingStates.length ? ` Missing states: ${pendingStates.join(', ')}.` : '';
+                return {
+                    reason: 'seed_required',
+                    detail: `Avatar setup is incomplete.${missingStates} Re-run Digital Twin Setup.`,
+                };
+            }
+        } catch {
+            // Fall through to generic message.
+        }
+
+        return {
+            reason: 'media_unavailable',
+            detail: 'Avatar media is temporarily unavailable. Refresh or re-run setup.',
+        };
+    }, []);
+
     const fetchState = useCallback(async () => {
         try {
             if (!hasLoadedRef.current) setLoading(true);
             setError(null);
-            const res = await apiFetch<AvatarStatePayload>('/api/avatar/state');
+            setUnavailableReason(null);
+            setUnavailableDetail(null);
+            const dayKey = getLocalDateYmd();
+            const res = await apiFetch<AvatarStatePayload>(`/api/avatar/state?date=${encodeURIComponent(dayKey)}`);
 
-            if (!res.success) throw new Error(res.error);
+            if (!res.success) {
+                const unavailable = await resolveUnavailableReason(res.error);
+                setUnavailableReason(unavailable.reason);
+                setUnavailableDetail(unavailable.detail);
+                throw new Error(res.error);
+            }
             const nextImage = res.data?.imageUrl ?? null;
             const nextVideo = res.data?.videoUrl ?? null;
+            setAvatarState(res.data?.state ?? null);
             setImageUrl(nextImage);
 
             if (nextVideo) {
@@ -51,23 +173,22 @@ export function DigitalTwinAvatar() {
             }
 
             setVideoUrl(null);
+            const unavailable = await resolveUnavailableReason('No avatar video available');
+            setUnavailableReason(unavailable.reason);
+            setUnavailableDetail(unavailable.detail);
             if (!nextImage) {
                 throw new Error('No avatar media available yet');
             }
-        } catch (e: any) {
-            const message = e?.message || 'Failed to load avatar';
-            if (message.includes("No avatar")) {
-                setError("setup_required");
-            } else {
-                setError(message);
-            }
+        } catch (e: unknown) {
+            const message = e instanceof Error ? e.message : 'Failed to load avatar';
+            setError(message);
         } finally {
             if (!hasLoadedRef.current) {
                 setLoading(false);
                 hasLoadedRef.current = true;
             }
         }
-    }, []);
+    }, [resolveUnavailableReason]);
 
     useEffect(() => {
         fetchState();
@@ -76,67 +197,182 @@ export function DigitalTwinAvatar() {
         return () => clearInterval(interval);
     }, [fetchState]);
 
+    const renderGlassCard = (children: React.ReactNode) => (
+        <View style={styles.root}>
+            <LinearGradient
+                colors={['rgba(255,255,255,0.78)', 'rgba(255,255,255,0.56)']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.glassCard}
+            >
+                <View style={styles.glassSheen} />
+                {children}
+            </LinearGradient>
+        </View>
+    );
+
     if (loading && !videoUrl && !imageUrl) {
-        return (
+        return renderGlassCard(
             <View className="items-center justify-center p-8">
                 <ActivityIndicator size="small" color="#7c3aed" />
             </View>
         );
     }
 
-    if (error === "setup_required" && !videoUrl && !imageUrl) {
-        return (
+    const unavailableTitle = unavailableReason === 'setup_required'
+        ? 'Avatar setup required'
+        : unavailableReason === 'seed_required'
+            ? 'Avatar media incomplete'
+            : unavailableReason === 'no_logs'
+                ? 'No daily logs yet'
+                : unavailableReason === 'media_unavailable'
+                    ? 'Avatar unavailable'
+                    : null;
+    const auraPreset = getAuraPresetForState(avatarState);
+
+    if (unavailableReason && !videoUrl && !imageUrl) {
+        return renderGlassCard(
             <View className="items-center justify-center p-8">
-                <View className="absolute inset-0 items-center justify-center">
+                <View style={styles.auraLayer}>
                     <View className="h-64 w-64 rounded-full bg-purple-500/10 blur-3xl" />
                 </View>
                 <View className="h-40 w-40 items-center justify-center rounded-full bg-gradient-to-tr from-purple-100 to-indigo-50 shadow-lg border-4 border-white/40 border-dashed">
-                    <Text className="text-center font-bold text-indigo-400 text-sm px-4">Tap Settings to setup Avatar</Text>
+                    <Text className="text-center font-bold text-indigo-500 text-sm px-4">{unavailableTitle}</Text>
                 </View>
+                <Text className="mt-3 text-center text-xs font-semibold text-slate-500 px-8">
+                    {unavailableDetail || 'Avatar media is not ready yet.'}
+                </Text>
             </View>
         );
     }
 
-    return (
+    return renderGlassCard(
         <View className="items-center justify-center p-8">
             {/* Aura Effect */}
-            <View className="absolute inset-0 items-center justify-center">
-                <View className="h-64 w-64 rounded-full bg-indigo-500/20 blur-3xl" />
+            <View style={styles.auraLayer}>
+                <View style={[styles.auraGlow, { backgroundColor: auraPreset.glowColor }]} />
             </View>
 
             <View className="items-center justify-center">
-                {/* The dynamic video frame */}
-                <View style={{ height: 160, width: 160, overflow: 'hidden', alignItems: 'center', justifyContent: 'center', borderRadius: 80, backgroundColor: '#ede9fe', shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 10, borderWidth: 4, borderColor: '#fff' }}>
-                    {videoUrl && !videoFailed ? (Platform.OS === 'web' ? (
-                        <video
-                            src={videoUrl}
-                            autoPlay
-                            loop
-                            muted
-                            playsInline
-                            onError={() => setVideoFailed(true)}
-                            onLoadedData={() => setVideoFailed(false)}
-                            style={{ width: '100%', height: '100%', objectFit: 'cover', position: 'absolute', top: 0, left: 0 }}
-                        />
-                    ) : (
-                        <Video
-                            key={videoUrl}
-                            source={{ uri: videoUrl }}
-                            style={{ width: '100%', height: '100%' }}
-                            resizeMode={ResizeMode.COVER}
-                            isMuted={true}
-                            shouldPlay={true}
-                            isLooping={true}
-                            onLoad={() => setVideoFailed(false)}
-                            onError={() => setVideoFailed(true)}
-                        />
-                    )) : imageUrl ? (
-                        <Image source={{ uri: imageUrl }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
-                    ) : (
-                        <Text className="text-indigo-400 text-xs font-semibold px-4 text-center">Avatar loading...</Text>
-                    )}
-                </View>
+                <LinearGradient
+                    colors={auraPreset.ringColors}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                    style={styles.auraRing}
+                >
+                    {/* The dynamic video frame */}
+                    <View style={[styles.videoFrame, { backgroundColor: auraPreset.frameBg }]}>
+                        {videoUrl && !videoFailed ? (Platform.OS === 'web' ? (
+                            <video
+                                src={videoUrl}
+                                autoPlay
+                                loop
+                                muted
+                                playsInline
+                                onError={() => setVideoFailed(true)}
+                                onLoadedData={() => setVideoFailed(false)}
+                                style={{ width: '100%', height: '100%', objectFit: 'cover', position: 'absolute', top: 0, left: 0 }}
+                            />
+                        ) : (
+                            <Video
+                                key={videoUrl}
+                                source={{ uri: videoUrl }}
+                                style={{ width: '100%', height: '100%' }}
+                                resizeMode={ResizeMode.COVER}
+                                isMuted={true}
+                                shouldPlay={true}
+                                isLooping={true}
+                                onLoad={() => setVideoFailed(false)}
+                                onError={() => setVideoFailed(true)}
+                            />
+                        )) : imageUrl ? (
+                            <Image source={{ uri: imageUrl }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+                        ) : (
+                            <Text className="text-indigo-400 text-xs font-semibold px-4 text-center">Avatar loading...</Text>
+                        )}
+                    </View>
+                </LinearGradient>
+                {!!imageUrl && !videoUrl && (
+                    <Text className="mt-3 text-center text-xs font-semibold text-slate-500 px-6">
+                        {unavailableDetail || 'Video unavailable for now. Showing avatar image fallback.'}
+                    </Text>
+                )}
+                {error && !unavailableReason && (
+                    <Text className="mt-3 text-center text-xs font-semibold text-rose-500 px-6">
+                        {error}
+                    </Text>
+                )}
             </View>
         </View>
     );
 }
+
+const styles = StyleSheet.create({
+    root: {
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingHorizontal: 14,
+        paddingVertical: 10,
+    },
+    glassCard: {
+        width: '100%',
+        maxWidth: 340,
+        borderRadius: 30,
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.58)',
+        overflow: 'hidden',
+        shadowColor: '#1f2937',
+        shadowOpacity: 0.12,
+        shadowRadius: 18,
+        shadowOffset: { width: 0, height: 8 },
+        elevation: 7,
+        alignItems: 'center',
+        justifyContent: 'center',
+        position: 'relative',
+    },
+    glassSheen: {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        height: '45%',
+        backgroundColor: 'rgba(255,255,255,0.22)',
+    },
+    auraLayer: {
+        position: 'absolute',
+        top: 0,
+        right: 0,
+        bottom: 0,
+        left: 0,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    auraGlow: {
+        height: 256,
+        width: 256,
+        borderRadius: 128,
+    },
+    auraRing: {
+        height: 170,
+        width: 170,
+        borderRadius: 85,
+        padding: 4,
+        alignItems: 'center',
+        justifyContent: 'center',
+        shadowColor: '#111827',
+        shadowOpacity: 0.18,
+        shadowRadius: 14,
+        shadowOffset: { width: 0, height: 6 },
+        elevation: 8,
+    },
+    videoFrame: {
+        height: 162,
+        width: 162,
+        borderRadius: 81,
+        overflow: 'hidden',
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderWidth: 3,
+        borderColor: '#ffffff',
+    },
+});

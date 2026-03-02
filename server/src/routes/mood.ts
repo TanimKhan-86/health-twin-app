@@ -1,107 +1,141 @@
 import { Router, Response } from 'express';
+import { z } from 'zod';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import MoodEntry from '../models/MoodEntry';
+import { getUtcDayRange, shiftUtcDays, toUtcDayStart } from '../lib/dateUtils';
+import { getErrorMessage, getMongooseValidationMessage, sendError, sendSuccess } from '../lib/apiResponse';
+import { parseBody, parseParams, parseQuery, QUERY_LIMITS } from '../lib/validation';
 
 const router = Router();
 router.use(authenticate);
 
-function toUtcDayStart(input?: string | Date): Date {
-    const parsed = input ? new Date(input) : new Date();
-    if (Number.isNaN(parsed.getTime())) {
-        throw new Error('Invalid date');
-    }
-    parsed.setUTCHours(0, 0, 0, 0);
-    return parsed;
-}
+const moodSchema = z.enum(['happy', 'sad', 'stressed', 'tired', 'energetic', 'neutral', 'calm', 'anxious', 'excited']);
+const todayQuerySchema = z.object({
+    date: z.string().trim().optional(),
+});
 
-function getErrorMessage(err: any): string {
-    if (err?.name === 'ValidationError') {
-        const first = Object.values(err.errors || {})[0] as { message?: string } | undefined;
-        return first?.message || 'Validation failed';
+const daysQuerySchema = z.object({
+    days: z.coerce
+        .number()
+        .int()
+        .min(QUERY_LIMITS.days.min)
+        .max(QUERY_LIMITS.days.max)
+        .default(QUERY_LIMITS.days.default),
+});
+
+const limitQuerySchema = z.object({
+    limit: z.coerce
+        .number()
+        .int()
+        .min(QUERY_LIMITS.historyLimit.min)
+        .max(QUERY_LIMITS.historyLimit.max)
+        .default(QUERY_LIMITS.historyLimit.default),
+});
+
+const idParamSchema = z.object({
+    id: z.string().regex(/^[0-9a-fA-F]{24}$/, 'Invalid entry id'),
+});
+
+const moodCreateSchema = z.object({
+    date: z.union([z.string(), z.date()]).optional(),
+    mood: moodSchema,
+    energyLevel: z.coerce.number().int().min(1).max(10),
+    stressLevel: z.coerce.number().int().min(1).max(10),
+    notes: z.string().trim().max(2000).optional(),
+});
+
+const moodUpdateSchema = z.object({
+    mood: moodSchema.optional(),
+    energyLevel: z.coerce.number().int().min(1).max(10).optional(),
+    stressLevel: z.coerce.number().int().min(1).max(10).optional(),
+    notes: z.string().trim().max(2000).optional(),
+}).refine((value) => Object.keys(value).length > 0, 'At least one field must be provided');
+
+function resolveWriteStatusCode(error: unknown): number {
+    const candidate = error as { name?: string; code?: number; message?: string };
+    if (candidate?.name === 'ValidationError' || candidate?.code === 11000 || candidate?.message === 'Invalid date') {
+        return 400;
     }
-    if (err?.code === 11000) {
-        return 'Daily mood log already exists for this date';
-    }
-    if (typeof err?.message === 'string' && err.message.length > 0) {
-        return err.message;
-    }
-    return 'Server error';
+    return 500;
 }
 
 // GET /api/mood
 router.get('/', async (req: AuthRequest, res: Response): Promise<void> => {
+    const query = parseQuery(res, daysQuerySchema, req.query);
+    if (!query) return;
+
     try {
-        const days = parseInt(req.query.days as string) || 30;
-        const since = new Date();
-        since.setDate(since.getDate() - days);
+        const todayUtc = toUtcDayStart();
+        const since = shiftUtcDays(todayUtc, -(query.days - 1));
 
         const entries = await MoodEntry.find({
             userId: req.userId,
             date: { $gte: since },
         }).sort({ date: -1 });
 
-        res.json({ success: true, data: entries });
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ success: false, error: 'Server error' });
+        sendSuccess(res, entries);
+    } catch (error: unknown) {
+        console.error(error);
+        sendError(res, 500, getErrorMessage(error));
     }
 });
 
 // GET /api/mood/today
 router.get('/today', async (req: AuthRequest, res: Response): Promise<void> => {
-    try {
-        const start = new Date();
-        start.setHours(0, 0, 0, 0);
-        const end = new Date();
-        end.setHours(23, 59, 59, 999);
+    const query = parseQuery(res, todayQuerySchema, req.query);
+    if (!query) return;
 
+    try {
+        const { start, end } = getUtcDayRange(query.date);
         const entry = await MoodEntry.findOne({
             userId: req.userId,
-            date: { $gte: start, $lte: end },
+            date: { $gte: start, $lt: end },
         }).sort({ updatedAt: -1, createdAt: -1 });
 
-        res.json({ success: true, data: entry ?? null });
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ success: false, error: 'Server error' });
+        sendSuccess(res, entry ?? null);
+    } catch (error: unknown) {
+        console.error(error);
+        sendError(res, 500, getErrorMessage(error));
     }
 });
 
 // GET /api/mood/history?limit=7
 router.get('/history', async (req: AuthRequest, res: Response): Promise<void> => {
+    const query = parseQuery(res, limitQuerySchema, req.query);
+    if (!query) return;
+
     try {
-        const limit = parseInt(req.query.limit as string) || 30;
-        const since = new Date();
-        since.setDate(since.getDate() - limit);
+        const todayUtc = toUtcDayStart();
+        const since = shiftUtcDays(todayUtc, -(query.limit - 1));
 
         const entries = await MoodEntry.find({
             userId: req.userId,
             date: { $gte: since },
         }).sort({ date: -1 });
 
-        res.json({ success: true, data: entries });
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ success: false, error: 'Server error' });
+        sendSuccess(res, entries);
+    } catch (error: unknown) {
+        console.error(error);
+        sendError(res, 500, getErrorMessage(error));
     }
 });
 
 // POST /api/mood
 router.post('/', async (req: AuthRequest, res: Response): Promise<void> => {
+    const input = parseBody(res, moodCreateSchema, req.body);
+    if (!input) return;
+
     try {
-        const { date, mood, energyLevel, stressLevel, notes } = req.body;
-        const normalizedDate = toUtcDayStart(date);
-
-        const setFields: Record<string, unknown> = {};
-        if (mood !== undefined) setFields.mood = mood;
-        if (energyLevel !== undefined) setFields.energyLevel = energyLevel;
-        if (stressLevel !== undefined) setFields.stressLevel = stressLevel;
-        if (notes !== undefined) setFields.notes = notes;
-
+        const normalizedDate = toUtcDayStart(input.date);
         const entry = await MoodEntry.findOneAndUpdate(
             { userId: req.userId, date: normalizedDate },
             {
-                $set: setFields,
+                $set: {
+                    mood: input.mood,
+                    energyLevel: input.energyLevel,
+                    stressLevel: input.stressLevel,
+                    ...(input.notes !== undefined ? { notes: input.notes } : {}),
+                },
                 $setOnInsert: {
                     userId: req.userId,
                     date: normalizedDate,
@@ -115,39 +149,54 @@ router.post('/', async (req: AuthRequest, res: Response): Promise<void> => {
             }
         );
 
-        res.json({ success: true, data: entry });
-    } catch (err: any) {
-        console.error(err);
-        const statusCode = err?.name === 'ValidationError' || err?.code === 11000 || err?.message === 'Invalid date' ? 400 : 500;
-        res.status(statusCode).json({ success: false, error: getErrorMessage(err) });
+        sendSuccess(res, entry);
+    } catch (error: unknown) {
+        console.error(error);
+        const statusCode = resolveWriteStatusCode(error);
+        const message = getMongooseValidationMessage(error, 'Daily mood log already exists for this date');
+        sendError(res, statusCode, message);
     }
 });
 
 // PUT /api/mood/:id
 router.put('/:id', async (req: AuthRequest, res: Response): Promise<void> => {
+    const params = parseParams(res, idParamSchema, req.params);
+    if (!params) return;
+    const body = parseBody(res, moodUpdateSchema, req.body);
+    if (!body) return;
+
     try {
         const entry = await MoodEntry.findOneAndUpdate(
-            { _id: req.params.id, userId: req.userId },
-            req.body,
+            { _id: params.id, userId: req.userId },
+            body,
             { new: true, runValidators: true }
         );
-        if (!entry) { res.status(404).json({ success: false, error: 'Entry not found' }); return; }
-        res.json({ success: true, data: entry });
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ success: false, error: 'Server error' });
+        if (!entry) {
+            sendError(res, 404, 'Entry not found');
+            return;
+        }
+        sendSuccess(res, entry);
+    } catch (error: unknown) {
+        console.error(error);
+        sendError(res, 500, getErrorMessage(error));
     }
 });
 
 // DELETE /api/mood/:id
 router.delete('/:id', async (req: AuthRequest, res: Response): Promise<void> => {
+    const params = parseParams(res, idParamSchema, req.params);
+    if (!params) return;
+
     try {
-        const entry = await MoodEntry.findOneAndDelete({ _id: req.params.id, userId: req.userId });
-        if (!entry) { res.status(404).json({ success: false, error: 'Entry not found' }); return; }
-        res.json({ success: true, data: { message: 'Deleted' } });
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ success: false, error: 'Server error' });
+        const entry = await MoodEntry.findOneAndDelete({ _id: params.id, userId: req.userId });
+        if (!entry) {
+            sendError(res, 404, 'Entry not found');
+            return;
+        }
+        sendSuccess(res, { message: 'Deleted' });
+    } catch (error: unknown) {
+        console.error(error);
+        sendError(res, 500, getErrorMessage(error));
     }
 });
 

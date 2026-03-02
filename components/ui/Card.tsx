@@ -1,4 +1,4 @@
-import { View, ViewProps, Text } from "react-native";
+import { View, ViewProps, Text, TextProps } from "react-native";
 import { cn } from "../../lib/utils";
 
 export function Card({ className, ...props }: ViewProps) {
@@ -20,16 +20,14 @@ export function CardHeader({ className, ...props }: ViewProps) {
     );
 }
 
-export function CardTitle({ className, ...props }: TextProps & { children: React.ReactNode }) {
-    // We need to cast props because TextProps doesn't have children in some definitions
-    // but it works in RN.
+export function CardTitle({ className, ...props }: TextProps) {
     return (
         <Text
             className={cn(
                 "text-2xl font-semibold leading-none tracking-tight text-slate-900 dark:text-slate-100",
                 className
             )}
-            {...props as any}
+            {...props}
         />
     );
 }
@@ -46,6 +44,3 @@ export function CardFooter({ className, ...props }: ViewProps) {
         />
     );
 }
-
-// Helper to make TextProps available
-import { TextProps } from "react-native";

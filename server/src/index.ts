@@ -14,6 +14,8 @@ import aiRoutes from './routes/ai';
 import streakRoutes from './routes/streak';
 import avatarRoutes from './routes/avatar';
 import futureRoutes from './routes/future';
+import dailyLogRoutes from './routes/dailyLog';
+import { sendSuccess } from './lib/apiResponse';
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -43,10 +45,11 @@ app.use('/api/ai', aiRoutes);
 app.use('/api/streak', streakRoutes);
 app.use('/api/avatar', avatarRoutes);
 app.use('/api/future', futureRoutes);
+app.use('/api/daily-log', dailyLogRoutes);
 
 // Health check
 app.get('/', (_req, res) => {
-    res.json({ status: 'ok', message: 'Health Twin API is running' });
+    sendSuccess(res, { status: 'ok', message: 'Health Twin API is running' });
 });
 
 app.listen(PORT, () => {

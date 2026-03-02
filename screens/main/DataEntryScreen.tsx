@@ -6,6 +6,9 @@ import { Activity, Moon, Smile, ArrowLeft, Save, Calendar } from "lucide-react-n
 import { logHealth, logMood } from "../../lib/api/auth";
 import { useToast } from "../../components/ui/Toast";
 import { LinearGradient } from "expo-linear-gradient";
+import type { AppScreenProps } from "../../lib/navigation/types";
+import type { MoodType } from "../../lib/api/contracts";
+import { getLocalDateYmd } from "../../lib/date/localDay";
 
 const SECTIONS = [
     { title: "Physical Activity", icon: Activity, gradientColors: ["#7c3aed", "#6d28d9"] as [string, string], emoji: "🏃" },
@@ -13,7 +16,7 @@ const SECTIONS = [
     { title: "Mood & Wellness", icon: Smile, gradientColors: ["#f59e0b", "#d97706"] as [string, string], emoji: "😊" },
 ];
 
-const MOODS = [
+const MOODS: Array<{ val: MoodType; emoji: string; label: string; color: string }> = [
     { val: 'happy', emoji: '😄', label: 'Happy', color: '#10b981' },
     { val: 'calm', emoji: '😌', label: 'Calm', color: '#6366f1' },
     { val: 'tired', emoji: '😴', label: 'Tired', color: '#94a3b8' },
@@ -22,7 +25,7 @@ const MOODS = [
     { val: 'excited', emoji: '🤩', label: 'Excited', color: '#a855f7' },
 ];
 
-export default function DataEntryScreen({ navigation }: any) {
+export default function DataEntryScreen({ navigation }: AppScreenProps<'DataEntry'>) {
     const { showToast } = useToast();
     const [currentSection, setCurrentSection] = useState(0);
     const [saving, setSaving] = useState(false);
@@ -31,7 +34,7 @@ export default function DataEntryScreen({ navigation }: any) {
     const [activeMinutes, setActiveMinutes] = useState(30);
     const [sleepHours, setSleepHours] = useState(7);
     const [sleepQuality, setSleepQuality] = useState("");
-    const [mood, setMood] = useState("");
+    const [mood, setMood] = useState<MoodType | ''>('');
     const [energy, setEnergy] = useState(5);
     const [stress, setStress] = useState(3);
 
@@ -41,9 +44,11 @@ export default function DataEntryScreen({ navigation }: any) {
         } else {
             setSaving(true);
             try {
-                const today = new Date().toISOString().split('T')[0];
+                const today = getLocalDateYmd();
                 const result = await logHealth({ date: today, steps: parseInt(steps) || 0, sleepHours, energyScore: energy * 10 });
-                if (mood) await logMood({ date: today, mood, energyLevel: energy, stressLevel: stress } as any);
+                if (mood) {
+                    await logMood({ date: today, mood, energyLevel: energy, stressLevel: stress });
+                }
                 if (result) {
                     showToast('✅ Vitals saved!', 'success');
                     setTimeout(() => navigation.goBack(), 800);

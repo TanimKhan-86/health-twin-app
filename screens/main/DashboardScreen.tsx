@@ -1,13 +1,21 @@
 import React, { useState, useCallback } from "react";
-import { View, Text, ScrollView, TouchableOpacity, Image, StyleSheet } from "react-native";
+import { View, Text, ScrollView, Pressable, Platform, Image, StyleSheet } from "react-native";
 import { ScreenLayout } from "../../components/ScreenLayout";
 import { DigitalTwinAvatar } from "../../components/DigitalTwinAvatar";
-import { Activity, Heart, Moon, Droplets, Trophy, Zap } from "lucide-react-native";
+import { Activity, Heart, Moon, Zap } from "lucide-react-native";
 import { useFocusEffect } from "@react-navigation/native";
 import { useAuth } from "../../contexts/AuthContext";
 import { getStreak, getTodayHealth } from "../../lib/api/auth";
 import { apiFetch } from "../../lib/api/client";
 import { LinearGradient } from "expo-linear-gradient";
+import { useToast } from "../../components/ui/Toast";
+import type { AppScreenProps } from "../../lib/navigation/types";
+import type { HealthEntry } from "../../lib/api/auth";
+import type { RootStackParamList } from "../../lib/navigation/types";
+import { PageHeader } from "../../components/ui/PageHeader";
+import { AppButton } from "../../components/ui/AppButton";
+import { appTheme } from "../../lib/theme/tokens";
+import { FadeInSection } from "../../components/ui/FadeInSection";
 
 interface MetricCardProps {
     icon: React.ReactNode;
@@ -18,22 +26,35 @@ interface MetricCardProps {
 }
 
 function MetricCard({ icon, label, value, subValue, iconBg }: MetricCardProps) {
+    const [hovered, setHovered] = useState(false);
     return (
-        <View style={styles.metricCard}>
+        <Pressable
+            onHoverIn={() => setHovered(true)}
+            onHoverOut={() => setHovered(false)}
+            style={({ pressed }) => [
+                styles.metricCard,
+                hovered ? styles.metricCardHover : undefined,
+                pressed ? styles.metricCardPressed : undefined,
+            ]}
+        >
             <View style={[styles.metricIcon, { backgroundColor: iconBg }]}>{icon}</View>
             <Text style={styles.metricValue}>{value}</Text>
             <Text style={styles.metricLabel}>{label}</Text>
             <Text style={styles.metricSub}>{subValue}</Text>
-        </View>
+        </Pressable>
     );
 }
 
-export default function DashboardScreen({ navigation }: any) {
+export default function DashboardScreen({ navigation }: AppScreenProps<'Main'>) {
     const { user } = useAuth();
+    const { showToast } = useToast();
     const [streak, setStreak] = useState(0);
-    const [todayHealth, setTodayHealth] = useState<any>(null);
+    const [todayHealth, setTodayHealth] = useState<HealthEntry | null>(null);
     const [avatarKey, setAvatarKey] = useState("init");
     const [profileAvatarUrl, setProfileAvatarUrl] = useState<string | null>(user?.profileImage ?? null);
+    const [hoveredHeaderItem, setHoveredHeaderItem] = useState<'streak' | 'avatar' | null>(null);
+    const [hoveredActionRow, setHoveredActionRow] = useState<string | null>(null);
+    const webPointerStyle = Platform.OS === 'web' ? ({ cursor: 'pointer' } as any) : undefined;
 
     useFocusEffect(useCallback(() => { loadDashboard(); }, []));
 
@@ -52,86 +73,154 @@ export default function DashboardScreen({ navigation }: any) {
     };
 
     const firstName = user?.name?.split(' ')[0] || 'there';
+    const greeting = (() => {
+        const hour = new Date().getHours();
+        if (hour < 12) return 'Good morning';
+        if (hour < 18) return 'Good afternoon';
+        return 'Good evening';
+    })();
     const initials = user?.name
         ? user.name.split(' ').map((n: string) => n[0]).join('').toUpperCase().slice(0, 2)
         : '?';
+    const heartRateValue = typeof todayHealth?.heartRate === 'number'
+        ? `${Math.round(todayHealth.heartRate)} BPM`
+        : '—';
+    const heartRateSub = typeof todayHealth?.heartRate === 'number'
+        ? (todayHealth.heartRate >= 100 ? 'High' : todayHealth.heartRate < 60 ? 'Low' : 'Normal')
+        : 'Log today';
+    const actionItems: Array<{
+        icon: string;
+        label: string;
+        sub: string;
+        screen: keyof RootStackParamList;
+        color: string;
+    }> = [
+        { icon: '📋', label: 'Log Daily Vitals', sub: 'Saved to MongoDB ☁️', screen: 'DailyLog', color: '#7c3aed' },
+        { icon: '🌀', label: 'What-If Scenarios', sub: 'AI Predictions', screen: 'WhatIf', color: '#6366f1' },
+        { icon: '🏆', label: 'Achievements', sub: `🔥 ${streak} day streak`, screen: 'Achievements', color: '#f59e0b' },
+        { icon: '📈', label: 'Weekly Summary', sub: "Your Twin's Report", screen: 'WeeklySummary', color: '#10b981' },
+    ];
 
     return (
         <ScreenLayout gradientBackground>
             <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
 
                 {/* Header */}
-                <View style={styles.header}>
-                    <View>
-                        <Text style={styles.greeting}>Good morning,</Text>
-                        <Text style={styles.name}>{firstName} 👋</Text>
-                    </View>
-                    <View style={styles.headerRight}>
-                        <TouchableOpacity onPress={() => navigation.navigate('Achievements')} style={styles.streakBadge}>
-                            <Text style={styles.streakEmoji}>🔥</Text>
-                            <Text style={styles.streakNum}>{streak}</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity onPress={() => navigation.navigate("Settings")} style={styles.avatarWrap}>
-                            {profileAvatarUrl
-                                ? <Image source={{ uri: profileAvatarUrl }} style={styles.avatarImg} />
-                                : <Text style={styles.avatarInitials}>{initials}</Text>}
-                        </TouchableOpacity>
-                    </View>
-                </View>
+                <PageHeader
+                    title={`${greeting}, ${firstName} 👋`}
+                    subtitle="Your health snapshot"
+                    gradientColors={[appTheme.colors.brand, appTheme.colors.brandDark]}
+                    rightSlot={(
+                        <View style={styles.headerRight}>
+                            <Pressable
+                                onPress={() => navigation.navigate('Achievements')}
+                                onHoverIn={() => setHoveredHeaderItem('streak')}
+                                onHoverOut={() => setHoveredHeaderItem(null)}
+                                style={({ pressed }) => [
+                                    styles.streakBadge,
+                                    hoveredHeaderItem === 'streak' ? styles.headerChipHover : undefined,
+                                    pressed ? styles.headerChipPressed : undefined,
+                                    webPointerStyle,
+                                ]}
+                            >
+                                <Text style={styles.streakEmoji}>🔥</Text>
+                                <Text style={styles.streakNum}>{streak}</Text>
+                            </Pressable>
+                            <Pressable
+                                onPress={() => navigation.navigate("Settings")}
+                                onHoverIn={() => setHoveredHeaderItem('avatar')}
+                                onHoverOut={() => setHoveredHeaderItem(null)}
+                                style={({ pressed }) => [
+                                    styles.avatarWrap,
+                                    hoveredHeaderItem === 'avatar' ? styles.headerChipHover : undefined,
+                                    pressed ? styles.headerChipPressed : undefined,
+                                    webPointerStyle,
+                                ]}
+                            >
+                                {profileAvatarUrl
+                                    ? <Image source={{ uri: profileAvatarUrl }} style={styles.avatarImg} />
+                                    : <Text style={styles.avatarInitials}>{initials}</Text>}
+                            </Pressable>
+                        </View>
+                    )}
+                />
 
                 {/* Avatar Section */}
-                <View style={styles.avatarSection}>
-                    <DigitalTwinAvatar key={avatarKey} />
-                </View>
+                <FadeInSection delay={40}>
+                    <View style={styles.avatarSection}>
+                        <DigitalTwinAvatar key={avatarKey} />
+                    </View>
+                </FadeInSection>
 
                 {/* Metric Cards */}
-                <View style={styles.metricsContainer}>
-                    <Text style={styles.sectionTitle}>Live Health Metrics</Text>
-                    <View style={styles.metricsGrid}>
-                        <MetricCard
-                            icon={<Heart color="#ef4444" size={18} />} iconBg="#fef2f2"
-                            label="Heart Rate" value="72 BPM" subValue="Normal"
-                        />
-                        <MetricCard
-                            icon={<Activity color="#7c3aed" size={18} />} iconBg="#f5f3ff"
-                            label="Steps"
-                            value={todayHealth?.steps != null ? todayHealth.steps.toLocaleString() : '—'}
-                            subValue={todayHealth?.steps != null ? (todayHealth.steps >= 8000 ? '🏃 Great!' : 'Keep going!') : 'Log today'}
-                        />
-                        <MetricCard
-                            icon={<Moon color="#6366f1" size={18} />} iconBg="#eef2ff"
-                            label="Sleep"
-                            value={todayHealth?.sleepHours != null ? `${todayHealth.sleepHours}h` : '—'}
-                            subValue={todayHealth?.sleepHours != null ? (todayHealth.sleepHours >= 7 ? '😴 Rested' : 'Need rest') : 'Log today'}
-                        />
-                        <MetricCard
-                            icon={<Zap color="#f59e0b" size={18} />} iconBg="#fffbeb"
-                            label="Energy"
-                            value={todayHealth?.energyScore != null ? `${Math.round(todayHealth.energyScore)}` : '—'}
-                            subValue={todayHealth?.energyScore != null ? (todayHealth.energyScore >= 70 ? '⚡ High' : 'Low') : 'Log today'}
-                        />
+                <FadeInSection delay={80}>
+                    <View style={styles.metricsContainer}>
+                        <Text style={styles.sectionTitle}>Live Health Metrics</Text>
+                        <View style={styles.metricsGrid}>
+                            <MetricCard
+                                icon={<Heart color="#ef4444" size={18} />} iconBg="#fef2f2"
+                                label="Heart Rate" value={heartRateValue} subValue={heartRateSub}
+                            />
+                            <MetricCard
+                                icon={<Activity color="#7c3aed" size={18} />} iconBg="#f5f3ff"
+                                label="Steps"
+                                value={todayHealth?.steps != null ? todayHealth.steps.toLocaleString() : '—'}
+                                subValue={todayHealth?.steps != null ? (todayHealth.steps >= 8000 ? '🏃 Great!' : 'Keep going!') : 'Log today'}
+                            />
+                            <MetricCard
+                                icon={<Moon color="#6366f1" size={18} />} iconBg="#eef2ff"
+                                label="Sleep"
+                                value={todayHealth?.sleepHours != null ? `${todayHealth.sleepHours}h` : '—'}
+                                subValue={todayHealth?.sleepHours != null ? (todayHealth.sleepHours >= 7 ? '😴 Rested' : 'Need rest') : 'Log today'}
+                            />
+                            <MetricCard
+                                icon={<Zap color="#f59e0b" size={18} />} iconBg="#fffbeb"
+                                label="Energy"
+                                value={todayHealth?.energyScore != null ? `${Math.round(todayHealth.energyScore)}` : '—'}
+                                subValue={todayHealth?.energyScore != null ? (todayHealth.energyScore >= 70 ? '⚡ High' : 'Low') : 'Log today'}
+                            />
+                        </View>
                     </View>
-                </View>
+                </FadeInSection>
 
                 {/* Quick Actions */}
-                <View style={styles.quickActions}>
-                    <TouchableOpacity style={styles.quickBtn} onPress={() => navigation.navigate('FutureYou')}>
-                        <Text style={styles.quickBtnText}>🔮 Future You</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={[styles.quickBtn, styles.quickBtnRight]} onPress={() => navigation.navigate('Analytics')}>
-                        <Text style={styles.quickBtnText}>📊 Analytics</Text>
-                    </TouchableOpacity>
-                </View>
+                <FadeInSection delay={120}>
+                    <View style={styles.quickActions}>
+                        <View style={{ flex: 1 }}>
+                            <AppButton
+                                label="Future You"
+                                onPress={() => navigation.navigate('FutureYou')}
+                                variant="secondary"
+                                icon={<Text style={{ fontSize: 14 }}>🔮</Text>}
+                            />
+                        </View>
+                        <View style={{ flex: 1 }}>
+                            <AppButton
+                                label="Analytics"
+                                onPress={() => navigation.navigate('Analytics')}
+                                variant="secondary"
+                                icon={<Text style={{ fontSize: 14 }}>📊</Text>}
+                            />
+                        </View>
+                    </View>
+                </FadeInSection>
 
                 {/* Action List */}
-                <View style={styles.actionList}>
-                    {[
-                        { icon: '📋', label: 'Log Daily Vitals', sub: 'Saved to MongoDB ☁️', screen: 'DataEntry', color: '#7c3aed' },
-                        { icon: '🌀', label: 'What-If Scenarios', sub: 'AI Predictions', screen: 'WhatIf', color: '#6366f1' },
-                        { icon: '🏆', label: 'Achievements', sub: `🔥 ${streak} day streak`, screen: 'Achievements', color: '#f59e0b' },
-                        { icon: '📈', label: 'Weekly Summary', sub: "Your Twin's Report", screen: 'WeeklySummary', color: '#10b981' },
-                    ].map((item) => (
-                        <TouchableOpacity key={item.screen} style={styles.actionRow} onPress={() => navigation.navigate(item.screen)} activeOpacity={0.7}>
+                <FadeInSection delay={160}>
+                    <View style={styles.actionList}>
+                    {actionItems.map((item) => (
+                        <Pressable
+                            key={item.screen}
+                            style={({ pressed }) => [
+                                styles.actionRow,
+                                hoveredActionRow === item.screen ? styles.actionRowHover : undefined,
+                                pressed ? styles.actionRowPressed : undefined,
+                                webPointerStyle,
+                            ]}
+                            onHoverIn={() => setHoveredActionRow(item.screen)}
+                            onHoverOut={() => setHoveredActionRow(null)}
+                            onPress={() => navigation.navigate(item.screen)}
+                        >
                             <View style={[styles.actionIconWrap, { backgroundColor: item.color + '18' }]}>
                                 <Text style={styles.actionIconEmoji}>{item.icon}</Text>
                             </View>
@@ -140,15 +229,48 @@ export default function DashboardScreen({ navigation }: any) {
                                 <Text style={styles.actionSub}>{item.sub}</Text>
                             </View>
                             <Text style={styles.actionChevron}>›</Text>
-                        </TouchableOpacity>
+                        </Pressable>
                     ))}
 
+                    <Pressable
+                        style={({ pressed }) => [
+                            styles.actionRow,
+                            hoveredActionRow === 'watch' ? styles.actionRowHover : undefined,
+                            pressed ? styles.actionRowPressed : undefined,
+                            webPointerStyle,
+                        ]}
+                        onHoverIn={() => setHoveredActionRow('watch')}
+                        onHoverOut={() => setHoveredActionRow(null)}
+                        onPress={() => showToast('⌚ Digital watch connection coming soon', 'info')}
+                    >
+                        <View style={[styles.actionIconWrap, { backgroundColor: '#0ea5e918' }]}>
+                            <Text style={styles.actionIconEmoji}>⌚</Text>
+                        </View>
+                        <View style={{ flex: 1 }}>
+                            <Text style={styles.actionLabel}>Connect Digital Watch</Text>
+                            <Text style={styles.actionSub}>Coming soon</Text>
+                        </View>
+                        <Text style={styles.actionChevron}>›</Text>
+                    </Pressable>
+
                     {/* AI Weekly Analysis — featured */}
-                    <TouchableOpacity onPress={() => navigation.navigate("AIWeeklyAnalysis")} activeOpacity={0.85}>
+                    <Pressable
+                        onPress={() => navigation.navigate("AIWeeklyAnalysis")}
+                        onHoverIn={() => setHoveredActionRow('ai-analysis')}
+                        onHoverOut={() => setHoveredActionRow(null)}
+                        style={({ pressed }) => [
+                            hoveredActionRow === 'ai-analysis' ? styles.aiActionHoverWrap : undefined,
+                            pressed ? styles.aiActionPressedWrap : undefined,
+                            webPointerStyle,
+                        ]}
+                    >
                         <LinearGradient
                             colors={["#7c3aed", "#6d28d9"]}
                             start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
-                            style={styles.aiActionRow}
+                            style={[
+                                styles.aiActionRow,
+                                hoveredActionRow === 'ai-analysis' ? styles.aiActionRowHover : undefined,
+                            ]}
                         >
                             <View style={styles.aiIconWrap}>
                                 <Text style={{ fontSize: 22 }}>🤖</Text>
@@ -159,8 +281,9 @@ export default function DashboardScreen({ navigation }: any) {
                             </View>
                             <Text style={styles.aiChevron}>›</Text>
                         </LinearGradient>
-                    </TouchableOpacity>
-                </View>
+                    </Pressable>
+                    </View>
+                </FadeInSection>
             </ScrollView>
         </ScreenLayout>
     );
@@ -168,11 +291,10 @@ export default function DashboardScreen({ navigation }: any) {
 
 const styles = StyleSheet.create({
     scroll: { paddingBottom: 100 },
-    header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 24, paddingTop: 8, paddingBottom: 4 },
-    greeting: { fontSize: 14, color: '#6d28d9', fontWeight: '500' },
-    name: { fontSize: 24, fontWeight: '800', color: '#1e1b4b' },
     headerRight: { flexDirection: 'row', alignItems: 'center', gap: 10 },
     streakBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.7)', borderRadius: 20, paddingHorizontal: 12, paddingVertical: 6, gap: 4, borderWidth: 1, borderColor: '#e9d5ff' },
+    headerChipHover: { transform: [{ translateY: -1 }], shadowOpacity: 0.16, shadowRadius: 10 },
+    headerChipPressed: { opacity: 0.92, transform: [{ scale: 0.98 }] },
     streakEmoji: { fontSize: 16 },
     streakNum: { fontWeight: '800', color: '#7c3aed', fontSize: 15 },
     avatarWrap: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#7c3aed', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', borderWidth: 2, borderColor: '#fff' },
@@ -182,7 +304,7 @@ const styles = StyleSheet.create({
     avatarSection: { height: 280, justifyContent: 'center' },
 
     metricsContainer: { paddingHorizontal: 20, marginBottom: 16 },
-    sectionTitle: { fontSize: 16, fontWeight: '700', color: '#1e1b4b', marginBottom: 12 },
+    sectionTitle: { ...appTheme.typography.h3, color: appTheme.colors.textPrimary, marginBottom: 12 },
     metricsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
     metricCard: {
         flex: 1, minWidth: '45%', backgroundColor: '#ffffff',
@@ -191,27 +313,45 @@ const styles = StyleSheet.create({
         shadowOpacity: 0.08, shadowRadius: 12, elevation: 3,
         borderWidth: 1, borderColor: '#f3f0ff',
     },
-    metricIcon: { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center', marginBottom: 8 },
-    metricValue: { fontSize: 20, fontWeight: '800', color: '#1e1b4b' },
-    metricLabel: { fontSize: 11, color: '#6b7280', fontWeight: '500', marginTop: 2 },
-    metricSub: { fontSize: 10, fontWeight: '700', color: '#7c3aed', marginTop: 2 },
+    metricCardHover: {
+        transform: [{ translateY: -2 }],
+        shadowOpacity: 0.14,
+        shadowRadius: 16,
+    },
+    metricCardPressed: {
+        opacity: 0.96,
+        transform: [{ scale: 0.99 }],
+    },
+    metricIcon: { width: 42, height: 42, borderRadius: 12, alignItems: 'center', justifyContent: 'center', marginBottom: 8 },
+    metricValue: { ...appTheme.typography.metric, color: appTheme.colors.textPrimary },
+    metricLabel: { ...appTheme.typography.caption, color: appTheme.colors.textSecondary, marginTop: 2 },
+    metricSub: { ...appTheme.typography.overline, color: appTheme.colors.brandDark, marginTop: 2 },
 
     quickActions: { flexDirection: 'row', paddingHorizontal: 20, marginBottom: 16, gap: 10 },
-    quickBtn: { flex: 1, backgroundColor: '#ffffff', borderRadius: 16, paddingVertical: 14, alignItems: 'center', borderWidth: 1.5, borderColor: '#e9d5ff', shadowColor: '#7c3aed', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 2 },
-    quickBtnRight: {},
-    quickBtnText: { fontWeight: '700', color: '#4c1d95', fontSize: 14 },
 
     actionList: { paddingHorizontal: 20, gap: 10 },
     actionRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#ffffff', borderRadius: 18, padding: 16, gap: 14, shadowColor: '#7c3aed', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 10, elevation: 2, borderWidth: 1, borderColor: '#f3f0ff' },
-    actionIconWrap: { width: 44, height: 44, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+    actionIconWrap: { width: 42, height: 42, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
     actionIconEmoji: { fontSize: 20 },
-    actionLabel: { fontSize: 15, fontWeight: '700', color: '#1e1b4b' },
-    actionSub: { fontSize: 12, color: '#9ca3af', marginTop: 2 },
+    actionLabel: { ...appTheme.typography.bodyStrong, color: appTheme.colors.textPrimary },
+    actionSub: { ...appTheme.typography.caption, color: appTheme.colors.textMuted, marginTop: 2 },
     actionChevron: { fontSize: 22, color: '#c4b5fd', fontWeight: '300' },
+    actionRowHover: {
+        transform: [{ translateY: -1 }],
+        shadowOpacity: 0.12,
+        shadowRadius: 12,
+    },
+    actionRowPressed: {
+        opacity: 0.94,
+        transform: [{ scale: 0.995 }],
+    },
 
     aiActionRow: { flexDirection: 'row', alignItems: 'center', borderRadius: 18, padding: 16, gap: 14, shadowColor: '#7c3aed', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 12, elevation: 6 },
-    aiIconWrap: { width: 44, height: 44, borderRadius: 14, backgroundColor: 'rgba(255,255,255,0.2)', alignItems: 'center', justifyContent: 'center' },
-    aiActionLabel: { fontSize: 15, fontWeight: '700', color: '#ffffff' },
-    aiActionSub: { fontSize: 12, color: 'rgba(255,255,255,0.75)', marginTop: 2 },
+    aiActionRowHover: { shadowOpacity: 0.36, shadowRadius: 14 },
+    aiActionHoverWrap: { transform: [{ translateY: -1 }] },
+    aiActionPressedWrap: { opacity: 0.95, transform: [{ scale: 0.995 }] },
+    aiIconWrap: { width: 42, height: 42, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.2)', alignItems: 'center', justifyContent: 'center' },
+    aiActionLabel: { ...appTheme.typography.bodyStrong, color: '#ffffff' },
+    aiActionSub: { ...appTheme.typography.caption, color: 'rgba(255,255,255,0.75)', marginTop: 2 },
     aiChevron: { fontSize: 22, color: 'rgba(255,255,255,0.6)', fontWeight: '300' },
 });

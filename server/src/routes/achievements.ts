@@ -2,6 +2,7 @@ import { Router, Response } from 'express';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import HealthEntry from '../models/HealthEntry';
 import MoodEntry from '../models/MoodEntry';
+import { getErrorMessage, sendError, sendSuccess } from '../lib/apiResponse';
 
 const router = Router();
 router.use(authenticate);
@@ -91,10 +92,10 @@ router.get('/', async (req: AuthRequest, res: Response): Promise<void> => {
         ];
 
         const unlockedCount = badges.filter(b => b.unlocked).length;
-        res.json({ badges, unlockedCount, totalBadges: badges.length });
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: 'Server error' });
+        sendSuccess(res, { badges, unlockedCount, totalBadges: badges.length });
+    } catch (error: unknown) {
+        console.error(error);
+        sendError(res, 500, getErrorMessage(error));
     }
 });
 

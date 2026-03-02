@@ -1,99 +1,146 @@
 import { Router, Response } from 'express';
+import { z } from 'zod';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import HealthEntry from '../models/HealthEntry';
 import MoodEntry from '../models/MoodEntry';
+import { getUtcDayRange, shiftUtcDays, toUtcDayStart } from '../lib/dateUtils';
+import { getErrorMessage, getMongooseValidationMessage, sendError, sendSuccess } from '../lib/apiResponse';
+import { parseBody, parseParams, parseQuery, QUERY_LIMITS } from '../lib/validation';
 
 const router = Router();
 router.use(authenticate);
 
-function toUtcDayStart(input?: string | Date): Date {
-    const parsed = input ? new Date(input) : new Date();
-    if (Number.isNaN(parsed.getTime())) {
-        throw new Error('Invalid date');
-    }
-    parsed.setUTCHours(0, 0, 0, 0);
-    return parsed;
-}
+const dateInputSchema = z.union([z.string(), z.date()]);
+const todayQuerySchema = z.object({
+    date: z.string().trim().optional(),
+});
 
-function getErrorMessage(err: any): string {
-    if (err?.name === 'ValidationError') {
-        const first = Object.values(err.errors || {})[0] as { message?: string } | undefined;
-        return first?.message || 'Validation failed';
+const daysQuerySchema = z.object({
+    days: z.coerce
+        .number()
+        .int()
+        .min(QUERY_LIMITS.days.min)
+        .max(QUERY_LIMITS.days.max)
+        .default(QUERY_LIMITS.days.default),
+});
+
+const limitQuerySchema = z.object({
+    limit: z.coerce
+        .number()
+        .int()
+        .min(QUERY_LIMITS.historyLimit.min)
+        .max(QUERY_LIMITS.historyLimit.max)
+        .default(QUERY_LIMITS.historyLimit.default),
+});
+
+const idParamSchema = z.object({
+    id: z.string().regex(/^[0-9a-fA-F]{24}$/, 'Invalid entry id'),
+});
+
+const healthUpsertSchema = z.object({
+    date: dateInputSchema.optional(),
+    steps: z.coerce.number().int().min(0).max(300000).optional(),
+    activeMinutes: z.coerce.number().int().min(0).max(1440).optional(),
+    sleepHours: z.coerce.number().min(0).max(24).optional(),
+    waterLitres: z.coerce.number().min(0).max(20).optional(),
+    heartRate: z.coerce.number().int().min(0).max(260).optional(),
+    energyScore: z.coerce.number().min(0).max(100).optional(),
+    weight: z.coerce.number().min(0).max(500).optional(),
+    notes: z.string().trim().max(2000).optional(),
+}).refine(
+    (value) => Object.keys(value).some((key) => key !== 'date'),
+    'At least one metric field must be provided'
+);
+
+const healthUpdateSchema = z.object({
+    steps: z.coerce.number().int().min(0).max(300000).optional(),
+    activeMinutes: z.coerce.number().int().min(0).max(1440).optional(),
+    sleepHours: z.coerce.number().min(0).max(24).optional(),
+    waterLitres: z.coerce.number().min(0).max(20).optional(),
+    heartRate: z.coerce.number().int().min(0).max(260).optional(),
+    energyScore: z.coerce.number().min(0).max(100).optional(),
+    weight: z.coerce.number().min(0).max(500).optional(),
+    notes: z.string().trim().max(2000).optional(),
+}).refine(
+    (value) => Object.keys(value).length > 0,
+    'At least one updatable field is required'
+);
+
+function resolveWriteStatusCode(error: unknown): number {
+    const candidate = error as { name?: string; code?: number; message?: string };
+    if (candidate?.name === 'ValidationError' || candidate?.code === 11000 || candidate?.message === 'Invalid date') {
+        return 400;
     }
-    if (err?.code === 11000) {
-        return 'Daily health log already exists for this date';
-    }
-    if (typeof err?.message === 'string' && err.message.length > 0) {
-        return err.message;
-    }
-    return 'Server error';
+    return 500;
 }
 
 // GET /api/health — all entries for user (optionally last N days)
 router.get('/', async (req: AuthRequest, res: Response): Promise<void> => {
-    try {
-        const days = parseInt(req.query.days as string) || 30;
-        const since = new Date();
-        since.setDate(since.getDate() - days);
+    const query = parseQuery(res, daysQuerySchema, req.query);
+    if (!query) return;
 
+    try {
+        const todayUtc = toUtcDayStart();
+        const since = shiftUtcDays(todayUtc, -(query.days - 1));
         const entries = await HealthEntry.find({
             userId: req.userId,
             date: { $gte: since },
         }).sort({ date: -1 });
-
-        res.json({ success: true, data: entries });
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ success: false, error: 'Server error' });
+        sendSuccess(res, entries);
+    } catch (error: unknown) {
+        console.error(error);
+        sendError(res, 500, getErrorMessage(error));
     }
 });
 
 // GET /api/health/today
 router.get('/today', async (req: AuthRequest, res: Response): Promise<void> => {
-    try {
-        const start = new Date();
-        start.setHours(0, 0, 0, 0);
-        const end = new Date();
-        end.setHours(23, 59, 59, 999);
+    const query = parseQuery(res, todayQuerySchema, req.query);
+    if (!query) return;
 
+    try {
+        const { start, end } = getUtcDayRange(query.date);
         const entry = await HealthEntry.findOne({
             userId: req.userId,
-            date: { $gte: start, $lte: end },
+            date: { $gte: start, $lt: end },
         }).sort({ updatedAt: -1, createdAt: -1 });
-
-        res.json({ success: true, data: entry ?? null });
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ success: false, error: 'Server error' });
+        sendSuccess(res, entry ?? null);
+    } catch (error: unknown) {
+        console.error(error);
+        sendError(res, 500, getErrorMessage(error));
     }
 });
 
 // GET /api/health/history?limit=7
 router.get('/history', async (req: AuthRequest, res: Response): Promise<void> => {
-    try {
-        const limit = parseInt(req.query.limit as string) || 30;
-        const since = new Date();
-        since.setDate(since.getDate() - limit);
+    const query = parseQuery(res, limitQuerySchema, req.query);
+    if (!query) return;
 
+    try {
+        const todayUtc = toUtcDayStart();
+        const since = shiftUtcDays(todayUtc, -(query.limit - 1));
         const entries = await HealthEntry.find({
             userId: req.userId,
             date: { $gte: since },
         }).sort({ date: -1 });
-
-        res.json({ success: true, data: entries });
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ success: false, error: 'Server error' });
+        sendSuccess(res, entries);
+    } catch (error: unknown) {
+        console.error(error);
+        sendError(res, 500, getErrorMessage(error));
     }
 });
 
 // POST /api/health/seed-demo — creates 7 days of backdated health + mood data
 router.post('/seed-demo', async (req: AuthRequest, res: Response): Promise<void> => {
     try {
-        const userId = req.userId!;
-        const MOODS = ['happy', 'energetic', 'neutral', 'tired', 'stressed', 'sad'] as const;
+        const userId = req.userId;
+        if (!userId) {
+            sendError(res, 401, 'Unauthorized');
+            return;
+        }
 
-        // Clear existing data
+        const moods = ['happy', 'energetic', 'neutral', 'tired', 'stressed', 'sad'] as const;
+
         await Promise.all([
             HealthEntry.deleteMany({ userId }),
             MoodEntry.deleteMany({ userId }),
@@ -102,19 +149,17 @@ router.post('/seed-demo', async (req: AuthRequest, res: Response): Promise<void>
         const healthDocs = [];
         const moodDocs = [];
 
-        for (let i = 6; i >= 0; i--) {
-            const date = new Date();
-            date.setDate(date.getDate() - i);
-            date.setHours(12, 0, 0, 0);
-
+        for (let i = 6; i >= 0; i -= 1) {
+            const date = shiftUtcDays(toUtcDayStart(), -i);
             healthDocs.push({
                 userId,
                 date,
                 steps: 5000 + Math.floor(Math.random() * 7000),
+                activeMinutes: 15 + Math.floor(Math.random() * 75),
                 sleepHours: +(5 + Math.random() * 4).toFixed(1),
                 waterLitres: +(1.5 + Math.random() * 1.5).toFixed(1),
                 heartRate: 60 + Math.floor(Math.random() * 30),
-                energyScore: 40 + Math.floor(Math.random() * 60), // 40–99
+                energyScore: 40 + Math.floor(Math.random() * 60),
                 weight: +(70 + Math.random() * 5).toFixed(1),
                 notes: `Demo entry day ${7 - i}`,
             });
@@ -122,7 +167,7 @@ router.post('/seed-demo', async (req: AuthRequest, res: Response): Promise<void>
             moodDocs.push({
                 userId,
                 date,
-                mood: MOODS[Math.floor(Math.random() * MOODS.length)],
+                mood: moods[Math.floor(Math.random() * moods.length)],
                 energyLevel: 4 + Math.floor(Math.random() * 7),
                 stressLevel: 1 + Math.floor(Math.random() * 6),
                 notes: `Demo mood day ${7 - i}`,
@@ -134,34 +179,34 @@ router.post('/seed-demo', async (req: AuthRequest, res: Response): Promise<void>
             MoodEntry.insertMany(moodDocs),
         ]);
 
-        res.json({
-            success: true,
-            data: {
-                message: '✅ 7 days of demo data seeded successfully',
-                healthEntries: healthDocs.length,
-                moodEntries: moodDocs.length,
-            },
+        sendSuccess(res, {
+            message: '7 days of demo data seeded successfully',
+            healthEntries: healthDocs.length,
+            moodEntries: moodDocs.length,
         });
-    } catch (err) {
-        console.error('Seed demo error:', err);
-        res.status(500).json({ success: false, error: 'Server error during seeding' });
+    } catch (error: unknown) {
+        console.error('Seed demo error:', error);
+        sendError(res, 500, 'Server error during seeding');
     }
 });
 
-// POST /api/health — create a new entry
+// POST /api/health — create/update today entry
 router.post('/', async (req: AuthRequest, res: Response): Promise<void> => {
+    const input = parseBody(res, healthUpsertSchema, req.body);
+    if (!input) return;
+
     try {
-        const { date, steps, sleepHours, waterLitres, heartRate, energyScore, weight, notes } = req.body;
-        const normalizedDate = toUtcDayStart(date);
+        const normalizedDate = toUtcDayStart(input.date);
 
         const setFields: Record<string, unknown> = {};
-        if (steps !== undefined) setFields.steps = steps;
-        if (sleepHours !== undefined) setFields.sleepHours = sleepHours;
-        if (waterLitres !== undefined) setFields.waterLitres = waterLitres;
-        if (heartRate !== undefined) setFields.heartRate = heartRate;
-        if (energyScore !== undefined) setFields.energyScore = energyScore;
-        if (weight !== undefined) setFields.weight = weight;
-        if (notes !== undefined) setFields.notes = notes;
+        if (input.steps !== undefined) setFields.steps = input.steps;
+        if (input.activeMinutes !== undefined) setFields.activeMinutes = input.activeMinutes;
+        if (input.sleepHours !== undefined) setFields.sleepHours = input.sleepHours;
+        if (input.waterLitres !== undefined) setFields.waterLitres = input.waterLitres;
+        if (input.heartRate !== undefined) setFields.heartRate = input.heartRate;
+        if (input.energyScore !== undefined) setFields.energyScore = input.energyScore;
+        if (input.weight !== undefined) setFields.weight = input.weight;
+        if (input.notes !== undefined) setFields.notes = input.notes;
 
         const entry = await HealthEntry.findOneAndUpdate(
             { userId: req.userId, date: normalizedDate },
@@ -180,39 +225,54 @@ router.post('/', async (req: AuthRequest, res: Response): Promise<void> => {
             }
         );
 
-        res.json({ success: true, data: entry });
-    } catch (err: any) {
-        console.error(err);
-        const statusCode = err?.name === 'ValidationError' || err?.code === 11000 || err?.message === 'Invalid date' ? 400 : 500;
-        res.status(statusCode).json({ success: false, error: getErrorMessage(err) });
+        sendSuccess(res, entry);
+    } catch (error: unknown) {
+        console.error(error);
+        const statusCode = resolveWriteStatusCode(error);
+        const message = getMongooseValidationMessage(error, 'Daily health log already exists for this date');
+        sendError(res, statusCode, message);
     }
 });
 
 // PUT /api/health/:id — update entry
 router.put('/:id', async (req: AuthRequest, res: Response): Promise<void> => {
+    const params = parseParams(res, idParamSchema, req.params);
+    if (!params) return;
+    const body = parseBody(res, healthUpdateSchema, req.body);
+    if (!body) return;
+
     try {
         const entry = await HealthEntry.findOneAndUpdate(
-            { _id: req.params.id, userId: req.userId },
-            req.body,
+            { _id: params.id, userId: req.userId },
+            body,
             { new: true, runValidators: true }
         );
-        if (!entry) { res.status(404).json({ success: false, error: 'Entry not found' }); return; }
-        res.json({ success: true, data: entry });
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ success: false, error: 'Server error' });
+        if (!entry) {
+            sendError(res, 404, 'Entry not found');
+            return;
+        }
+        sendSuccess(res, entry);
+    } catch (error: unknown) {
+        console.error(error);
+        sendError(res, 500, getErrorMessage(error));
     }
 });
 
 // DELETE /api/health/:id
 router.delete('/:id', async (req: AuthRequest, res: Response): Promise<void> => {
+    const params = parseParams(res, idParamSchema, req.params);
+    if (!params) return;
+
     try {
-        const entry = await HealthEntry.findOneAndDelete({ _id: req.params.id, userId: req.userId });
-        if (!entry) { res.status(404).json({ success: false, error: 'Entry not found' }); return; }
-        res.json({ success: true, data: { message: 'Deleted' } });
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ success: false, error: 'Server error' });
+        const entry = await HealthEntry.findOneAndDelete({ _id: params.id, userId: req.userId });
+        if (!entry) {
+            sendError(res, 404, 'Entry not found');
+            return;
+        }
+        sendSuccess(res, { message: 'Deleted' });
+    } catch (error: unknown) {
+        console.error(error);
+        sendError(res, 500, getErrorMessage(error));
     }
 });
 

@@ -1,13 +1,20 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator, Platform, Image } from 'react-native';
 import { ScreenLayout } from '../../components/ScreenLayout';
-import { ArrowLeft, RefreshCw, Sparkles, CalendarDays, TrendingUp } from 'lucide-react-native';
+import { RefreshCw, Sparkles, CalendarDays, TrendingUp } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Video, ResizeMode } from 'expo-av';
 import { useFocusEffect } from '@react-navigation/native';
 import { FutureInsight, getFutureInsight } from '../../lib/api/auth';
 import { apiFetch } from '../../lib/api/client';
 import { useToast } from '../../components/ui/Toast';
+import type { AppScreenProps } from '../../lib/navigation/types';
+import { PageHeader } from '../../components/ui/PageHeader';
+import { SectionCard } from '../../components/ui/SectionCard';
+import { AppButton } from '../../components/ui/AppButton';
+import { EmptyState } from '../../components/ui/EmptyState';
+import { appTheme } from '../../lib/theme/tokens';
+import { FadeInSection } from '../../components/ui/FadeInSection';
 
 const STATE_THEME = {
     happy: { label: 'Happy', color: '#10b981', bg: '#ecfdf5', emoji: '😄' },
@@ -16,8 +23,16 @@ const STATE_THEME = {
 } as const;
 
 type FutureState = keyof typeof STATE_THEME;
+const WEB_VIDEO_STYLE: React.CSSProperties = {
+    width: '100%',
+    height: '100%',
+    objectFit: 'cover',
+    position: 'absolute',
+    top: 0,
+    left: 0,
+};
 
-export default function FutureYouScreen({ navigation }: any) {
+export default function FutureYouScreen({ navigation }: AppScreenProps<'FutureYou'>) {
     const { showToast } = useToast();
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
@@ -37,8 +52,8 @@ export default function FutureYouScreen({ navigation }: any) {
                 return;
             }
             setInsight(data);
-        } catch (e: any) {
-            setError(e?.message || 'Could not load future prediction');
+        } catch (e: unknown) {
+            setError(e instanceof Error ? e.message : 'Could not load future prediction');
         } finally {
             if (silent) setRefreshing(false);
             else setLoading(false);
@@ -58,6 +73,41 @@ export default function FutureYouScreen({ navigation }: any) {
     const projectedTheme = STATE_THEME[projectedState];
     const dominantTheme = STATE_THEME[dominantState];
     const currentTheme = STATE_THEME[currentState];
+    const futureMediaHint = useMemo(() => {
+        if (!insight) return null;
+
+        const hasVideo = !!insight.media?.projectedVideoUrl && !videoFailed;
+        if (hasVideo) return null;
+
+        if (!insight.media?.imageUrl) {
+            if (!insight.hasSevenDayData) {
+                return {
+                    title: 'No logs yet for projection media',
+                    body: 'Seed 7 days demo or log daily vitals first, then Future You can generate state-specific media.',
+                };
+            }
+            return {
+                title: 'Avatar setup required',
+                body: 'Open Settings > Digital Twin Setup to generate avatar image and emotion loops.',
+            };
+        }
+
+        if (!insight.media?.projectedVideoUrl) {
+            return {
+                title: 'Projection video unavailable',
+                body: 'Showing avatar image fallback. Generate or refresh avatar loops in Digital Twin Setup.',
+            };
+        }
+
+        if (videoFailed) {
+            return {
+                title: 'Projection video failed to load',
+                body: 'Showing avatar image fallback. Try refresh; if this persists, regenerate avatar media.',
+            };
+        }
+
+        return null;
+    }, [insight, videoFailed]);
 
     const totalTracked = useMemo(() => {
         if (!insight) return 0;
@@ -81,8 +131,8 @@ export default function FutureYouScreen({ navigation }: any) {
                 return;
             }
             showToast('Could not seed demo data', 'error');
-        } catch (e: any) {
-            showToast(e?.message || 'Could not seed demo data', 'error');
+        } catch (e: unknown) {
+            showToast(e instanceof Error ? e.message : 'Could not seed demo data', 'error');
         } finally {
             setRefreshing(false);
         }
@@ -104,17 +154,15 @@ export default function FutureYouScreen({ navigation }: any) {
     return (
         <ScreenLayout gradientBackground>
             <View style={{ flex: 1 }}>
-                <LinearGradient colors={['#7c3aed', '#6d28d9']} style={styles.headerGrad}>
-                    <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-                        <ArrowLeft color="white" size={18} />
-                        <Text style={styles.backText}>Back</Text>
-                    </TouchableOpacity>
-                    <Text style={styles.headerTitle}>Future You</Text>
-                    <Text style={styles.headerSub}>7-day behavior trend prediction</Text>
-                </LinearGradient>
+                <PageHeader
+                    title="Future You"
+                    subtitle="7-day behavior trend prediction"
+                    onBack={() => navigation.goBack()}
+                />
 
                 <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-                    <View style={styles.card}>
+                    <FadeInSection delay={40}>
+                        <SectionCard style={styles.card}>
                         <View style={{ alignItems: 'center' }}>
                             <View style={styles.avatarFrame}>
                                 {insight?.media?.projectedVideoUrl && !videoFailed ? (
@@ -126,7 +174,7 @@ export default function FutureYouScreen({ navigation }: any) {
                                             muted
                                             playsInline
                                             onError={() => setVideoFailed(true)}
-                                            style={styles.webVideo}
+                                            style={WEB_VIDEO_STYLE}
                                         />
                                     ) : (
                                         <Video
@@ -143,9 +191,15 @@ export default function FutureYouScreen({ navigation }: any) {
                                 ) : insight?.media?.imageUrl ? (
                                     <Image source={{ uri: insight.media.imageUrl }} style={styles.nativeVideo} resizeMode="cover" />
                                 ) : (
-                                    <Text style={styles.emptyAvatarText}>No avatar media</Text>
+                                    <Text style={styles.emptyAvatarText}>Avatar media unavailable</Text>
                                 )}
                             </View>
+                            {futureMediaHint && (
+                                <View style={styles.mediaHintBox}>
+                                    <Text style={styles.mediaHintTitle}>{futureMediaHint.title}</Text>
+                                    <Text style={styles.mediaHintBody}>{futureMediaHint.body}</Text>
+                                </View>
+                            )}
 
                             <View style={[styles.pill, { backgroundColor: projectedTheme.bg, borderColor: projectedTheme.color }]}>
                                 <Sparkles size={14} color={projectedTheme.color} />
@@ -158,11 +212,15 @@ export default function FutureYouScreen({ navigation }: any) {
                                 {insight?.insight || 'Could not generate future insight.'}
                             </Text>
                         </View>
-                    </View>
+                        </SectionCard>
+                    </FadeInSection>
 
-                    <View style={styles.card}>
+                    <FadeInSection delay={80}>
+                        <SectionCard style={styles.card}>
                         <View style={styles.titleRow}>
-                            <CalendarDays size={16} color="#7c3aed" />
+                            <View style={styles.titleIconWrap}>
+                                <CalendarDays size={16} color={appTheme.colors.brandDark} />
+                            </View>
                             <Text style={styles.cardTitle}>State Summary (Last 7 Days)</Text>
                         </View>
 
@@ -190,11 +248,15 @@ export default function FutureYouScreen({ navigation }: any) {
                         <Text style={styles.reasonLine}>• {insight?.reasoning?.dominant}</Text>
                         <Text style={styles.reasonLine}>• {insight?.reasoning?.current}</Text>
                         <Text style={styles.reasonLine}>• {insight?.reasoning?.projection}</Text>
-                    </View>
+                        </SectionCard>
+                    </FadeInSection>
 
-                    <View style={styles.card}>
+                    <FadeInSection delay={120}>
+                        <SectionCard style={styles.card}>
                         <View style={styles.titleRow}>
-                            <TrendingUp size={16} color="#7c3aed" />
+                            <View style={styles.titleIconWrap}>
+                                <TrendingUp size={16} color={appTheme.colors.brandDark} />
+                            </View>
                             <Text style={styles.cardTitle}>Trait Distribution</Text>
                         </View>
 
@@ -212,39 +274,55 @@ export default function FutureYouScreen({ navigation }: any) {
                                 </View>
                             );
                         })}
-                    </View>
+                        </SectionCard>
+                    </FadeInSection>
 
                     {!insight?.hasSevenDayData && (
-                        <View style={styles.card}>
-                            <Text style={styles.emptyTitle}>No 7-day data yet</Text>
-                            <Text style={styles.emptySub}>
-                                Seed demo data first, then Future You can predict whether your next weeks trend happy, sad, or sleepy.
-                            </Text>
-                            <TouchableOpacity style={styles.seedBtn} onPress={handleSeedDemo} disabled={refreshing}>
-                                {refreshing ? <ActivityIndicator size="small" color="#fff" /> : <RefreshCw size={16} color="#fff" />}
-                                <Text style={styles.seedBtnText}>{refreshing ? 'Seeding...' : 'Seed 7 Days Demo'}</Text>
-                            </TouchableOpacity>
-                        </View>
+                        <FadeInSection delay={150}>
+                            <SectionCard style={styles.card}>
+                            <EmptyState
+                                icon="📉"
+                                title="No 7-day data yet"
+                                description="Seed demo data first, then Future You can predict whether your next weeks trend happy, sad, or sleepy."
+                            />
+                            <View style={{ marginTop: 12 }}>
+                                <AppButton
+                                    label={refreshing ? 'Seeding...' : 'Seed 7-Day Demo'}
+                                    onPress={handleSeedDemo}
+                                    loading={refreshing}
+                                    icon={!refreshing ? <RefreshCw size={16} color="#fff" /> : undefined}
+                                />
+                            </View>
+                            </SectionCard>
+                        </FadeInSection>
                     )}
 
                     {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
-                    <TouchableOpacity style={styles.refreshBtn} onPress={() => loadInsight(true)} disabled={refreshing}>
-                        {refreshing ? <ActivityIndicator size="small" color="#6d28d9" /> : <RefreshCw size={16} color="#6d28d9" />}
-                        <Text style={styles.refreshText}>{refreshing ? 'Refreshing...' : 'Re-analyze Future You'}</Text>
-                    </TouchableOpacity>
+                    <FadeInSection delay={180}>
+                        <AppButton
+                            label={refreshing ? 'Refreshing...' : 'Re-analyze Future You'}
+                            onPress={() => loadInsight(true)}
+                            disabled={refreshing}
+                            loading={refreshing}
+                            variant="secondary"
+                            icon={!refreshing ? <RefreshCw size={16} color={appTheme.colors.brandDark} /> : undefined}
+                        />
+                    </FadeInSection>
 
-                    <TouchableOpacity style={styles.whatIfCta} activeOpacity={0.85} onPress={() => navigation.navigate('WhatIf')}>
-                        <LinearGradient
-                            colors={['#7c3aed', '#6d28d9']}
-                            start={{ x: 0, y: 0 }}
-                            end={{ x: 1, y: 0 }}
-                            style={styles.whatIfCtaInner}
-                        >
-                            <Text style={styles.whatIfCtaTitle}>Want to improve? What-if I did...</Text>
-                            <Text style={styles.whatIfCtaSub}>Open Scenario Explorer</Text>
-                        </LinearGradient>
-                    </TouchableOpacity>
+                    <FadeInSection delay={220}>
+                        <TouchableOpacity style={styles.whatIfCta} activeOpacity={0.85} onPress={() => navigation.navigate('WhatIf')}>
+                            <LinearGradient
+                                colors={['#7c3aed', '#6d28d9']}
+                                start={{ x: 0, y: 0 }}
+                                end={{ x: 1, y: 0 }}
+                                style={styles.whatIfCtaInner}
+                            >
+                                <Text style={styles.whatIfCtaTitle}>Want to improve? What-if I did...</Text>
+                                <Text style={styles.whatIfCtaSub}>Open Scenario Explorer</Text>
+                            </LinearGradient>
+                        </TouchableOpacity>
+                    </FadeInSection>
                 </ScrollView>
             </View>
         </ScreenLayout>
@@ -252,34 +330,9 @@ export default function FutureYouScreen({ navigation }: any) {
 }
 
 const styles = StyleSheet.create({
-    headerGrad: { paddingHorizontal: 20, paddingTop: 10, paddingBottom: 28 },
-    backBtn: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 6,
-        backgroundColor: 'rgba(255,255,255,0.2)',
-        paddingHorizontal: 14,
-        paddingVertical: 8,
-        borderRadius: 20,
-        alignSelf: 'flex-start',
-        marginBottom: 12,
-    },
-    backText: { color: '#fff', fontWeight: '700' },
-    headerTitle: { fontSize: 24, fontWeight: '800', color: '#fff' },
-    headerSub: { fontSize: 13, color: 'rgba(255,255,255,0.75)', marginTop: 4 },
-    scroll: { padding: 16, paddingBottom: 60 },
+    scroll: { padding: 16, paddingBottom: 64, gap: 2 },
     card: {
-        backgroundColor: '#fff',
-        borderRadius: 20,
-        padding: 18,
-        marginBottom: 14,
-        borderWidth: 1,
-        borderColor: '#f3f0ff',
-        shadowColor: '#7c3aed',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.06,
-        shadowRadius: 10,
-        elevation: 2,
+        marginBottom: 16,
     },
     avatarFrame: {
         width: 164,
@@ -292,18 +345,10 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
     },
-    webVideo: {
-        width: '100%',
-        height: '100%',
-        objectFit: 'cover',
-        position: 'absolute',
-        top: 0,
-        left: 0,
-    } as any,
     nativeVideo: { width: '100%', height: '100%' },
     emptyAvatarText: { fontSize: 12, color: '#64748b', fontWeight: '600' },
     pill: {
-        marginTop: 14,
+        marginTop: 16,
         borderWidth: 1,
         paddingHorizontal: 12,
         paddingVertical: 7,
@@ -314,15 +359,25 @@ const styles = StyleSheet.create({
     },
     pillText: { fontWeight: '800', fontSize: 13 },
     insightText: {
-        marginTop: 12,
+        marginTop: 14,
         textAlign: 'center',
-        color: '#4b5563',
-        fontSize: 14,
+        color: appTheme.colors.textSecondary,
+        fontSize: appTheme.typography.body.fontSize,
         lineHeight: 21,
-        fontWeight: '500',
+        fontWeight: appTheme.typography.body.fontWeight,
     },
-    titleRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 14 },
-    cardTitle: { fontWeight: '800', fontSize: 16, color: '#1e1b4b' },
+    titleRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 16 },
+    titleIconWrap: {
+        width: 34,
+        height: 34,
+        borderRadius: 11,
+        backgroundColor: appTheme.colors.brandSoft,
+        borderWidth: 1,
+        borderColor: appTheme.colors.border,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    cardTitle: { ...appTheme.typography.h3, color: appTheme.colors.textPrimary, fontWeight: '800' },
     summaryGrid: { flexDirection: 'row', justifyContent: 'space-between', gap: 8 },
     summaryItem: {
         flex: 1,
@@ -333,39 +388,26 @@ const styles = StyleSheet.create({
         borderWidth: 1,
         borderColor: '#ede9fe',
     },
-    summaryLabel: { color: '#6b7280', fontSize: 11, fontWeight: '700', textTransform: 'uppercase' },
-    summaryValue: { marginTop: 3, fontSize: 14, fontWeight: '800' },
-    reasonLine: { marginTop: 8, color: '#4b5563', fontSize: 13, lineHeight: 19 },
-    barRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 12, gap: 8 },
-    barLabel: { width: 84, color: '#1e1b4b', fontWeight: '700', fontSize: 12 },
+    summaryLabel: { ...appTheme.typography.overline, color: appTheme.colors.textSecondary, textTransform: 'uppercase' },
+    summaryValue: { marginTop: 3, ...appTheme.typography.bodyStrong },
+    reasonLine: { marginTop: 8, color: appTheme.colors.textSecondary, fontSize: 13, lineHeight: 20, fontWeight: '500' },
+    barRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 12, gap: 10 },
+    barLabel: { width: 84, ...appTheme.typography.caption, color: appTheme.colors.textPrimary, fontWeight: '700' },
     barTrack: { flex: 1, height: 8, borderRadius: 6, backgroundColor: '#e9d5ff', overflow: 'hidden' },
     barFill: { height: '100%', borderRadius: 6 },
-    barCount: { width: 30, textAlign: 'right', color: '#4b5563', fontWeight: '700', fontSize: 12 },
-    emptyTitle: { fontWeight: '800', fontSize: 16, color: '#1e1b4b' },
-    emptySub: { marginTop: 6, color: '#6b7280', lineHeight: 20, fontSize: 13 },
-    seedBtn: {
-        marginTop: 14,
-        backgroundColor: '#7c3aed',
-        borderRadius: 12,
-        paddingVertical: 12,
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: 8,
-        flexDirection: 'row',
-    },
-    seedBtnText: { color: '#fff', fontWeight: '800', fontSize: 14 },
-    refreshBtn: {
-        backgroundColor: '#f5f3ff',
-        borderColor: '#ddd6fe',
+    barCount: { width: 30, textAlign: 'right', color: appTheme.colors.textSecondary, fontWeight: '700', fontSize: 12 },
+    mediaHintBox: {
+        marginTop: 12,
+        backgroundColor: '#f8fafc',
+        borderColor: '#e2e8f0',
         borderWidth: 1,
         borderRadius: 12,
-        paddingVertical: 12,
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: 8,
-        flexDirection: 'row',
+        paddingHorizontal: 12,
+        paddingVertical: 10,
+        width: '100%',
     },
-    refreshText: { color: '#6d28d9', fontWeight: '800', fontSize: 14 },
+    mediaHintTitle: { color: appTheme.colors.textPrimary, fontSize: 12, fontWeight: '800', textAlign: 'left' },
+    mediaHintBody: { color: appTheme.colors.textSecondary, fontSize: 12, lineHeight: 18, marginTop: 4, textAlign: 'left' },
     errorText: { color: '#ef4444', fontSize: 12, textAlign: 'center', marginBottom: 8 },
     whatIfCta: {
         marginTop: 12,
@@ -378,12 +420,12 @@ const styles = StyleSheet.create({
         elevation: 4,
     },
     whatIfCtaInner: {
-        paddingVertical: 14,
+        paddingVertical: 15,
         paddingHorizontal: 16,
         alignItems: 'center',
         justifyContent: 'center',
         borderRadius: 14,
     },
-    whatIfCtaTitle: { color: '#fff', fontWeight: '800', fontSize: 15 },
-    whatIfCtaSub: { color: 'rgba(255,255,255,0.85)', fontWeight: '600', fontSize: 12, marginTop: 2 },
+    whatIfCtaTitle: { color: '#fff', ...appTheme.typography.bodyStrong, fontSize: 15 },
+    whatIfCtaSub: { color: 'rgba(255,255,255,0.85)', ...appTheme.typography.caption, marginTop: 2 },
 });

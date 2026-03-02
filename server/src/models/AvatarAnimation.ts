@@ -10,7 +10,7 @@ export interface IAvatarAnimation extends Document {
     quality?: 'high' | 'standard';
     loopOptimized?: boolean;
     circularOptimized?: boolean;
-    generationMetadata?: Record<string, any>;
+    generationMetadata?: Record<string, unknown>;
     createdAt: Date;
     updatedAt: Date;
 }

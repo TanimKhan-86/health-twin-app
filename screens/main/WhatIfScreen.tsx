@@ -3,206 +3,42 @@ import { View, Text, ScrollView, TouchableOpacity, Dimensions, StyleSheet, Platf
 import Slider from "@react-native-community/slider";
 import { LineChart } from "react-native-gifted-charts";
 import { ScreenLayout } from "../../components/ScreenLayout";
-import { ArrowLeft, Activity, Moon, RefreshCw, TrendingUp, AlertTriangle } from "lucide-react-native";
+import { Activity, Moon, RefreshCw, TrendingUp, AlertTriangle } from "lucide-react-native";
 import { Video, ResizeMode } from "expo-av";
 import { calculatePredictedEnergy, predictMoodState, generatePredictionInsight, generateHabitSimulation } from "../../lib/prediction/model";
 import { getHealthHistory } from "../../lib/api/auth";
-import { apiFetch } from "../../lib/api/client";
-import { LinearGradient } from "expo-linear-gradient";
+import type { AppScreenProps } from "../../lib/navigation/types";
+import {
+    assessDataConfidence,
+    assessScenarioFeasibility,
+    AVATAR_STATE_META,
+    CONFIDENCE_META,
+    ConfidenceLevel,
+    lowerConfidence,
+    ScenarioAvatarState,
+    ScenarioSlot,
+    SavedScenario,
+    inferSimulationAvatarDecision,
+} from "./whatif/scenarioUtils";
+import { useScenarioAvatarLibrary } from "./whatif/useScenarioAvatarLibrary";
+import { PageHeader } from "../../components/ui/PageHeader";
+import { SectionCard } from "../../components/ui/SectionCard";
+import { AppButton } from "../../components/ui/AppButton";
+import { FadeInSection } from "../../components/ui/FadeInSection";
+import { chartTheme } from "../../lib/theme/charts";
+import { appTheme } from "../../lib/theme/tokens";
 
 const screenWidth = Dimensions.get("window").width;
-type ScenarioAvatarState = 'happy' | 'sad' | 'sleepy';
-type ConfidenceLevel = 'high' | 'medium' | 'low';
-const SCENARIO_STATES: ScenarioAvatarState[] = ['happy', 'sad', 'sleepy'];
-type ScenarioSlot = 'A' | 'B';
-interface ScenarioStateDecision {
-    state: ScenarioAvatarState;
-    ruleName: string;
-    ruleExpression: string;
-    matchedBecause: string;
-}
-interface SavedScenario {
-    sleep: number;
-    steps: number;
-    energy: number;
-    mood: string;
-    avatarState: ScenarioAvatarState;
-    confidence: ConfidenceLevel;
-    savedAtLabel: string;
-}
-interface FeasibilityAssessment {
-    confidence: ConfidenceLevel;
-    warnings: string[];
-    isUnrealistic: boolean;
-}
-interface DataConfidenceAssessment {
-    confidence: ConfidenceLevel;
-    loggedDays: number;
-    totalDays: number;
-    note: string;
-}
-
-const AVATAR_STATE_META: Record<ScenarioAvatarState, { label: string; emoji: string }> = {
-    happy: { label: 'Happy', emoji: '😄' },
-    sad: { label: 'Sad', emoji: '😔' },
-    sleepy: { label: 'Sleepy', emoji: '😴' },
-};
-const CONFIDENCE_META: Record<ConfidenceLevel, { label: string; color: string; bg: string; border: string }> = {
-    high: { label: 'High', color: '#047857', bg: '#ecfdf5', border: '#6ee7b7' },
-    medium: { label: 'Medium', color: '#b45309', bg: '#fffbeb', border: '#fcd34d' },
-    low: { label: 'Low', color: '#b91c1c', bg: '#fef2f2', border: '#fca5a5' },
+const WEB_VIDEO_STYLE: React.CSSProperties = {
+    width: '100%',
+    height: '100%',
+    objectFit: 'cover',
+    position: 'absolute',
+    top: 0,
+    left: 0,
 };
 
-function inferSimulationAvatarDecision(simSleep: number, predictedEnergy: number): ScenarioStateDecision {
-    if (simSleep <= 4.5) {
-        return {
-            state: 'sleepy',
-            ruleName: 'Rule A',
-            ruleExpression: 'if sleep <= 4.5h -> sleepy',
-            matchedBecause: `sleep=${simSleep.toFixed(1)}h`,
-        };
-    }
-
-    if (simSleep <= 5.5 && predictedEnergy < 55) {
-        return {
-            state: 'sleepy',
-            ruleName: 'Rule B',
-            ruleExpression: 'if sleep <= 5.5h and predictedEnergy < 55 -> sleepy',
-            matchedBecause: `sleep=${simSleep.toFixed(1)}h and energy=${predictedEnergy}`,
-        };
-    }
-
-    if (simSleep >= 7 && predictedEnergy >= 70) {
-        return {
-            state: 'happy',
-            ruleName: 'Rule C',
-            ruleExpression: 'if sleep >= 7h and predictedEnergy >= 70 -> happy',
-            matchedBecause: `sleep=${simSleep.toFixed(1)}h and energy=${predictedEnergy}`,
-        };
-    }
-
-    return {
-        state: 'sad',
-        ruleName: 'Rule D',
-        ruleExpression: 'otherwise -> sad',
-        matchedBecause: `sleep=${simSleep.toFixed(1)}h and energy=${predictedEnergy}`,
-    };
-}
-
-function normalizeStateVideos(raw?: Record<string, string> | null): Partial<Record<ScenarioAvatarState, string>> {
-    if (!raw) return {};
-    return {
-        happy: typeof raw.happy === 'string' ? raw.happy : undefined,
-        sad: typeof raw.sad === 'string' ? raw.sad : undefined,
-        sleepy: typeof raw.sleepy === 'string' ? raw.sleepy : undefined,
-    };
-}
-
-function hasAllScenarioStates(videoByState: Partial<Record<ScenarioAvatarState, string>>): boolean {
-    return SCENARIO_STATES.every((state) => typeof videoByState[state] === 'string' && !!videoByState[state]);
-}
-
-function assessScenarioFeasibility(
-    simSleep: number,
-    simSteps: number,
-    baselineSleep: number,
-    baselineSteps: number
-): FeasibilityAssessment {
-    let risk = 0;
-    const warnings: string[] = [];
-
-    if (simSleep < 4) {
-        risk += 3;
-        warnings.push(`Sleep at ${simSleep.toFixed(1)}h is likely unsustainable for daily planning.`);
-    } else if (simSleep < 5) {
-        risk += 1;
-        warnings.push(`Very low sleep (${simSleep.toFixed(1)}h) may reduce forecast reliability.`);
-    }
-
-    if (simSleep > 10) {
-        risk += 3;
-        warnings.push(`Sleep at ${simSleep.toFixed(1)}h is unusually high for a long-term routine.`);
-    } else if (simSleep > 9) {
-        risk += 1;
-        warnings.push(`High sleep (${simSleep.toFixed(1)}h) is less common in day-to-day patterns.`);
-    }
-
-    if (simSteps < 1000) {
-        risk += 1;
-        warnings.push(`Very low steps (${simSteps.toLocaleString()}) may represent an outlier day.`);
-    }
-
-    if (simSteps > 18000) {
-        risk += 2;
-        warnings.push(`Very high steps (${simSteps.toLocaleString()}) can be hard to maintain daily.`);
-    }
-
-    if (Math.abs(simSleep - baselineSleep) >= 3) {
-        risk += 2;
-        warnings.push(`Sleep change is large vs baseline (${(simSleep - baselineSleep).toFixed(1)}h).`);
-    }
-
-    if (Math.abs(simSteps - baselineSteps) >= 9000) {
-        risk += 1;
-        warnings.push(`Step change is large vs baseline (${(simSteps - baselineSteps).toLocaleString()}).`);
-    }
-
-    if (simSleep >= 10 && simSteps >= 16000) {
-        risk += 2;
-        warnings.push('Combining very high sleep with very high steps is likely unrealistic.');
-    }
-
-    if (simSleep <= 4.5 && simSteps >= 16000) {
-        risk += 2;
-        warnings.push('Low sleep with very high activity is an extreme combination.');
-    }
-
-    if (risk >= 6) {
-        return { confidence: 'low', warnings, isUnrealistic: true };
-    }
-    if (risk >= 3) {
-        return { confidence: 'medium', warnings, isUnrealistic: false };
-    }
-    return { confidence: 'high', warnings, isUnrealistic: false };
-}
-
-function confidenceRank(confidence: ConfidenceLevel): number {
-    if (confidence === 'high') return 3;
-    if (confidence === 'medium') return 2;
-    return 1;
-}
-
-function lowerConfidence(a: ConfidenceLevel, b: ConfidenceLevel): ConfidenceLevel {
-    return confidenceRank(a) <= confidenceRank(b) ? a : b;
-}
-
-function assessDataConfidence(loggedDays: number, totalDays: number = 7): DataConfidenceAssessment {
-    const safeLogged = Math.max(0, Math.min(totalDays, loggedDays));
-    if (safeLogged <= 2) {
-        return {
-            confidence: 'low',
-            loggedDays: safeLogged,
-            totalDays,
-            note: `Only ${safeLogged}/${totalDays} recent logs found. Forecast is tentative.`,
-        };
-    }
-    if (safeLogged <= 4) {
-        return {
-            confidence: 'medium',
-            loggedDays: safeLogged,
-            totalDays,
-            note: `Partial history (${safeLogged}/${totalDays} logs). Use forecast directionally.`,
-        };
-    }
-    return {
-        confidence: 'high',
-        loggedDays: safeLogged,
-        totalDays,
-        note: `Good recent coverage (${safeLogged}/${totalDays} logs).`,
-    };
-}
-
-export default function WhatIfScreen({ navigation }: any) {
+export default function WhatIfScreen({ navigation }: AppScreenProps<'WhatIf'>) {
     const [loading, setLoading] = useState(true);
 
     const [baselinesteps, setBaselineSteps] = useState(5000);
@@ -211,9 +47,11 @@ export default function WhatIfScreen({ navigation }: any) {
 
     const [simSteps, setSimSteps] = useState(5000);
     const [simSleep, setSimSleep] = useState(6.5);
-    const [avatarLoading, setAvatarLoading] = useState(true);
-    const [avatarImageUrl, setAvatarImageUrl] = useState<string | null>(null);
-    const [avatarVideoByState, setAvatarVideoByState] = useState<Partial<Record<ScenarioAvatarState, string>>>({});
+    const {
+        avatarLoading,
+        avatarImageUrl,
+        avatarVideoByState,
+    } = useScenarioAvatarLibrary();
     const [avatarVideoFailed, setAvatarVideoFailed] = useState(false);
     const [scenarioA, setScenarioA] = useState<SavedScenario | null>(null);
     const [scenarioB, setScenarioB] = useState<SavedScenario | null>(null);
@@ -257,12 +95,47 @@ export default function WhatIfScreen({ navigation }: any) {
             null,
         [avatarVideoByState, simulatedAvatarState]
     );
+    const scenarioMediaHint = useMemo(() => {
+        if (avatarLoading) return null;
+        if (previewVideoUrl && !avatarVideoFailed) return null;
+        if (avatarImageUrl) {
+            return 'Scenario video unavailable for this state. Showing avatar image fallback.';
+        }
+        if (availableLogDays === 0) {
+            return 'No logs found yet. Seed 7 days demo or log daily vitals, then generate avatar media.';
+        }
+        return 'Avatar setup required. Open Settings > Digital Twin Setup.';
+    }, [avatarLoading, previewVideoUrl, avatarVideoFailed, avatarImageUrl, availableLogDays]);
     const forecastData = useMemo(() => generateHabitSimulation(baselineSleep, baselinesteps, simSleep, simSteps, 30), [baselineSleep, baselinesteps, simSleep, simSteps]);
 
     const chartData = useMemo(() => forecastData.map((point) => ({
         value: point.predictedEnergy, label: point.day % 5 === 0 ? `D${point.day}` : '',
         dataPointText: point.day === 30 ? point.predictedEnergy.toString() : '',
     })), [forecastData]);
+    const forecastChartWidth = Math.max(240, screenWidth - 90);
+    const forecastChartProps = useMemo(() => ({
+        height: 160,
+        width: forecastChartWidth,
+        spacing: forecastChartWidth / 30,
+        thickness: 3,
+        hideDataPoints: true,
+        hideRules: false,
+        rulesType: 'solid' as const,
+        rulesColor: chartTheme.rulesColor,
+        yAxisColor: chartTheme.axisColor,
+        xAxisColor: chartTheme.axisColor,
+        yAxisTextStyle: chartTheme.axisText,
+        xAxisLabelTextStyle: { ...chartTheme.axisText, textAlign: 'center' as const },
+        maxValue: 100,
+        noOfSections: chartTheme.sections,
+        areaChart: true,
+        startFillColor: "#7c3aed",
+        endFillColor: "#f5f3ff",
+        startOpacity: 0.18,
+        endOpacity: 0.04,
+        animationDuration: 850,
+        isAnimated: true,
+    }), [forecastChartWidth]);
 
     const finalEnergyDiff = forecastData[forecastData.length - 1].predictedEnergy - baselineEnergy;
 
@@ -314,69 +187,11 @@ export default function WhatIfScreen({ navigation }: any) {
 
     useEffect(() => {
         loadData();
-        loadAvatarLibrary();
     }, []);
 
     useEffect(() => {
         setAvatarVideoFailed(false);
     }, [previewVideoUrl, simulationDecision.state]);
-
-    const loadAvatarLibrary = async () => {
-        try {
-            setAvatarLoading(true);
-            let resolvedImageUrl: string | null = null;
-            let resolvedVideos: Partial<Record<ScenarioAvatarState, string>> = {};
-
-            const library = await apiFetch<{ imageUrl?: string | null; videoByState?: Record<string, string> }>('/api/avatar/library');
-            if (library.success && library.data) {
-                resolvedImageUrl = library.data.imageUrl ?? resolvedImageUrl;
-                resolvedVideos = { ...resolvedVideos, ...normalizeStateVideos(library.data.videoByState || {}) };
-            }
-
-            const fallback = await apiFetch<{ state?: string; videoUrl?: string; imageUrl?: string | null; videoByState?: Record<string, string> }>('/api/avatar/state');
-            if (fallback.success && fallback.data) {
-                resolvedImageUrl = fallback.data.imageUrl ?? resolvedImageUrl;
-                resolvedVideos = { ...resolvedVideos, ...normalizeStateVideos(fallback.data.videoByState || {}) };
-                const state = fallback.data.state as ScenarioAvatarState | undefined;
-                const videoUrl = fallback.data.videoUrl;
-                if (state && videoUrl) {
-                    resolvedVideos[state] = videoUrl;
-                }
-            }
-
-            if (!hasAllScenarioStates(resolvedVideos)) {
-                const missingStates = SCENARIO_STATES.filter((state) => !resolvedVideos[state]);
-                const stateFetches = await Promise.all(
-                    missingStates.map(async (state) => {
-                        const response = await apiFetch<{ state?: string; videoUrl?: string; imageUrl?: string | null }>(
-                            `/api/avatar/state?state=${encodeURIComponent(state)}`
-                        );
-                        if (!response.success || !response.data?.videoUrl) return null;
-                        return {
-                            state,
-                            videoUrl: response.data.videoUrl,
-                            imageUrl: response.data.imageUrl ?? null,
-                        };
-                    })
-                );
-
-                for (const result of stateFetches) {
-                    if (!result) continue;
-                    resolvedVideos[result.state] = result.videoUrl;
-                    if (!resolvedImageUrl && result.imageUrl) {
-                        resolvedImageUrl = result.imageUrl;
-                    }
-                }
-            }
-
-            setAvatarImageUrl(resolvedImageUrl);
-            setAvatarVideoByState(resolvedVideos);
-        } catch (e) {
-            console.warn('Avatar library load error:', e);
-        } finally {
-            setAvatarLoading(false);
-        }
-    };
 
     const loadData = async () => {
         try {
@@ -384,9 +199,8 @@ export default function WhatIfScreen({ navigation }: any) {
             const logCount = Array.isArray(history) ? history.length : 0;
             setAvailableLogDays(logCount);
             if (history.length > 0) {
-                const h = history as any[];
-                const avgSteps = Math.round(h.reduce((s, e) => s + e.steps, 0) / h.length);
-                const avgSleep = h.reduce((s, e) => s + e.sleepHours, 0) / h.length;
+                const avgSteps = Math.round(history.reduce((s, e) => s + e.steps, 0) / history.length);
+                const avgSleep = history.reduce((s, e) => s + e.sleepHours, 0) / history.length;
                 setBaselineSteps(avgSteps); setBaselineSleep(Number(avgSleep.toFixed(1)));
                 setBaselineEnergy(calculatePredictedEnergy(avgSleep, avgSteps));
                 setSimSteps(avgSteps); setSimSleep(Number(avgSleep.toFixed(1)));
@@ -425,18 +239,16 @@ export default function WhatIfScreen({ navigation }: any) {
     return (
         <ScreenLayout gradientBackground>
             <View style={{ flex: 1 }}>
-                <LinearGradient colors={["#7c3aed", "#a855f7"]} style={styles.headerGrad}>
-                    <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-                        <ArrowLeft color="white" size={18} />
-                        <Text style={styles.backText}>Back</Text>
-                    </TouchableOpacity>
-                    <Text style={styles.headerTitle}>Scenario Explorer</Text>
-                    <Text style={styles.headerSub}>See how lifestyle changes affect you</Text>
-                </LinearGradient>
+                <PageHeader
+                    title="Scenario Explorer"
+                    subtitle="See how lifestyle changes affect you"
+                    onBack={() => navigation.goBack()}
+                />
 
                 <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
                     {/* Avatar Preview */}
-                    <View style={styles.card}>
+                    <FadeInSection delay={40}>
+                        <SectionCard style={styles.card}>
                         <View style={{ alignItems: 'center', marginVertical: 10 }}>
                             <View style={styles.avatarPreviewShell}>
                                 {avatarLoading && !previewVideoUrl && !avatarImageUrl ? (
@@ -451,7 +263,7 @@ export default function WhatIfScreen({ navigation }: any) {
                                             muted
                                             playsInline
                                             onError={() => setAvatarVideoFailed(true)}
-                                            style={styles.webVideo}
+                                            style={WEB_VIDEO_STYLE}
                                         />
                                     ) : (
                                         <Video
@@ -477,6 +289,7 @@ export default function WhatIfScreen({ navigation }: any) {
                                 </Text>
                             </View>
                             <Text style={styles.moodSubText}>Scenario model: {predictedMood}</Text>
+                            {scenarioMediaHint && <Text style={styles.scenarioMediaHint}>{scenarioMediaHint}</Text>}
                             <Text style={[styles.dataConfidenceInline, { color: dataConfidenceMeta.color }]}>
                                 Data confidence: {dataConfidenceMeta.label} ({dataConfidence.loggedDays}/{dataConfidence.totalDays} logs)
                             </Text>
@@ -490,10 +303,12 @@ export default function WhatIfScreen({ navigation }: any) {
                             </View>
                             <Text style={styles.narrativeText}>{finalNarrative}</Text>
                         </View>
-                    </View>
+                        </SectionCard>
+                    </FadeInSection>
 
                     {/* Controls */}
-                    <View style={styles.card}>
+                    <FadeInSection delay={80}>
+                        <SectionCard style={styles.card}>
                         <View style={styles.cardHeader}>
                             <Text style={styles.cardTitle}>Adjust Habits</Text>
                             <TouchableOpacity onPress={resetSimulation} style={styles.resetBtn}>
@@ -595,17 +410,19 @@ export default function WhatIfScreen({ navigation }: any) {
                         </View>
 
                         <View style={styles.saveScenarioRow}>
-                            <TouchableOpacity style={styles.saveScenarioBtn} onPress={() => saveScenario('A')}>
-                                <Text style={styles.saveScenarioBtnText}>Save as Scenario A</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity style={styles.saveScenarioBtn} onPress={() => saveScenario('B')}>
-                                <Text style={styles.saveScenarioBtnText}>Save as Scenario B</Text>
-                            </TouchableOpacity>
+                            <View style={{ flex: 1 }}>
+                                <AppButton label="Save as Scenario A" onPress={() => saveScenario('A')} variant="secondary" />
+                            </View>
+                            <View style={{ flex: 1 }}>
+                                <AppButton label="Save as Scenario B" onPress={() => saveScenario('B')} variant="secondary" />
+                            </View>
                         </View>
-                    </View>
+                        </SectionCard>
+                    </FadeInSection>
 
                     {/* Scenario Comparison */}
-                    <View style={styles.card}>
+                    <FadeInSection delay={120}>
+                        <SectionCard style={styles.card}>
                         <View style={styles.cardHeader}>
                             <Text style={styles.cardTitle}>Baseline vs Scenario A/B</Text>
                         </View>
@@ -731,10 +548,12 @@ export default function WhatIfScreen({ navigation }: any) {
                                 ))}
                             </View>
                         </View>
-                    </View>
+                        </SectionCard>
+                    </FadeInSection>
 
                     {/* Forecast Chart */}
-                    <View style={styles.card}>
+                    <FadeInSection delay={160}>
+                        <SectionCard style={styles.card}>
                         <View style={styles.forecastHeader}>
                             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                                 <View style={[styles.iconWrap, { backgroundColor: '#f5f3ff' }]}><TrendingUp size={16} color="#7c3aed" /></View>
@@ -750,17 +569,13 @@ export default function WhatIfScreen({ navigation }: any) {
 
                         <View style={{ marginLeft: -10, marginTop: 10, height: 200 }}>
                             <LineChart
-                                data={chartData} height={160} width={screenWidth - 90}
-                                spacing={(screenWidth - 90) / 30} thickness={3} color="#7c3aed"
-                                hideDataPoints hideRules={false} rulesType="solid" rulesColor="#f8fafc"
-                                yAxisColor="#e2e8f0" xAxisColor="#e2e8f0"
-                                yAxisTextStyle={{ color: '#94a3b8', fontSize: 10 }} xAxisLabelTextStyle={{ color: '#94a3b8', fontSize: 10, textAlign: 'center' }}
-                                maxValue={100} noOfSections={4} areaChart
-                                startFillColor="#7c3aed" endFillColor="#f5f3ff" startOpacity={0.18} endOpacity={0.04}
-                                animationDuration={800} isAnimated
+                                data={chartData}
+                                color="#7c3aed"
+                                {...forecastChartProps}
                             />
                         </View>
-                    </View>
+                        </SectionCard>
+                    </FadeInSection>
                 </ScrollView>
             </View>
         </ScreenLayout>
@@ -768,42 +583,9 @@ export default function WhatIfScreen({ navigation }: any) {
 }
 
 const styles = StyleSheet.create({
-    headerGrad: {
-        paddingHorizontal: 20,
-        paddingTop: 12,
-        paddingBottom: 26,
-        borderBottomLeftRadius: 26,
-        borderBottomRightRadius: 26,
-    },
-    backBtn: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 6,
-        backgroundColor: 'rgba(255,255,255,0.18)',
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.26)',
-        paddingHorizontal: 14,
-        paddingVertical: 8,
-        borderRadius: 20,
-        alignSelf: 'flex-start',
-        marginBottom: 12,
-    },
-    backText: { color: '#fff', fontWeight: '700', fontSize: 14 },
-    headerTitle: { fontSize: 25, fontWeight: '800', color: '#fff' },
-    headerSub: { fontSize: 13, color: 'rgba(255,255,255,0.88)', marginTop: 4 },
-    scroll: { padding: 16, paddingBottom: 80 },
+    scroll: { padding: 16, paddingBottom: 80, gap: 2 },
     card: {
-        backgroundColor: '#ffffff',
-        borderRadius: 22,
-        padding: 18,
-        marginBottom: 14,
-        shadowColor: '#7c3aed',
-        shadowOffset: { width: 0, height: 6 },
-        shadowOpacity: 0.08,
-        shadowRadius: 12,
-        elevation: 2,
-        borderWidth: 1,
-        borderColor: '#ede9fe',
+        marginBottom: 16,
     },
     avatarPreviewShell: {
         width: 154,
@@ -816,14 +598,6 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
     },
-    webVideo: {
-        width: '100%',
-        height: '100%',
-        objectFit: 'cover',
-        position: 'absolute',
-        top: 0,
-        left: 0,
-    } as any,
     nativeVideo: { width: '100%', height: '100%' },
     avatarFallbackText: {
         color: '#6d28d9',
@@ -839,11 +613,20 @@ const styles = StyleSheet.create({
         borderRadius: 16,
         borderWidth: 1,
         borderColor: '#ddd6fe',
-        marginTop: 12,
-        marginBottom: 10,
+        marginTop: 14,
+        marginBottom: 12,
     },
     moodText: { color: '#6d28d9', fontWeight: '800', fontSize: 15 },
-    moodSubText: { color: '#6b7280', fontSize: 12, fontWeight: '600', marginBottom: 8 },
+    moodSubText: { ...appTheme.typography.caption, color: appTheme.colors.textSecondary, marginBottom: 8 },
+    scenarioMediaHint: {
+        color: '#64748b',
+        fontSize: 11,
+        textAlign: 'center',
+        marginBottom: 8,
+        lineHeight: 17,
+        paddingHorizontal: 8,
+        fontWeight: '600',
+    },
     dataConfidenceInline: { fontSize: 11, fontWeight: '700', marginBottom: 8 },
     whyPanel: {
         width: '100%',
@@ -860,22 +643,23 @@ const styles = StyleSheet.create({
     whyMatch: { color: '#4b5563', fontSize: 11, marginTop: 4, fontWeight: '600' },
     whyValues: { color: '#6b7280', fontSize: 11, marginTop: 4, fontWeight: '600' },
     narrativeText: {
-        color: '#4b5563',
+        color: appTheme.colors.textSecondary,
         textAlign: 'center',
         fontSize: 13,
         lineHeight: 20,
+        fontWeight: '500',
         paddingHorizontal: 6,
     },
     cardHeader: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
-        marginBottom: 16,
+        marginBottom: 18,
         paddingBottom: 12,
         borderBottomWidth: 1,
         borderBottomColor: '#ede9fe',
     },
-    cardTitle: { fontSize: 16, fontWeight: '800', color: '#312e81' },
+    cardTitle: { ...appTheme.typography.h3, fontWeight: '800', color: appTheme.colors.textPrimary },
     resetBtn: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -887,8 +671,8 @@ const styles = StyleSheet.create({
         paddingVertical: 6,
         borderRadius: 12,
     },
-    resetText: { color: '#6d28d9', fontWeight: '700', fontSize: 12 },
-    controlGroup: { paddingVertical: 6 },
+    resetText: { ...appTheme.typography.caption, color: appTheme.colors.brandDark, fontWeight: '700' },
+    controlGroup: { paddingVertical: 8 },
     controlRow: {
         flexDirection: 'row',
         justifyContent: 'space-between',
@@ -897,15 +681,17 @@ const styles = StyleSheet.create({
     },
     controlLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
     iconWrap: {
-        width: 34,
-        height: 34,
-        borderRadius: 11,
+        width: 36,
+        height: 36,
+        borderRadius: 12,
         alignItems: 'center',
         justifyContent: 'center',
+        borderWidth: 1,
+        borderColor: appTheme.colors.border,
     },
-    controlLabel: { fontWeight: '700', color: '#334155', fontSize: 14 },
-    controlVal: { fontWeight: '800', fontSize: 20 },
-    controlSub: { fontSize: 11, color: '#94a3b8', marginTop: 2, fontWeight: '600' },
+    controlLabel: { ...appTheme.typography.bodyStrong, color: appTheme.colors.textPrimary },
+    controlVal: { ...appTheme.typography.metric },
+    controlSub: { ...appTheme.typography.overline, color: appTheme.colors.textMuted, marginTop: 2 },
     guardrailPanel: {
         borderWidth: 1,
         borderRadius: 14,
@@ -924,7 +710,7 @@ const styles = StyleSheet.create({
         marginBottom: 8,
     },
     guardrailTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-    guardrailTitle: { color: '#312e81', fontSize: 12, fontWeight: '800' },
+    guardrailTitle: { ...appTheme.typography.caption, color: appTheme.colors.textPrimary, fontWeight: '800' },
     confidenceBadge: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4 },
     confidenceBadgeText: { fontSize: 10, fontWeight: '800' },
     dataConfidenceRow: {
@@ -941,18 +727,8 @@ const styles = StyleSheet.create({
     guardrailWarningText: { fontSize: 11, color: '#6b7280', fontWeight: '600' },
     guardrailSafeText: { fontSize: 11, color: '#065f46', fontWeight: '700' },
     guardrailLowText: { marginTop: 8, fontSize: 11, color: '#b91c1c', fontWeight: '800' },
-    saveScenarioRow: { flexDirection: 'row', gap: 10, marginTop: 12 },
-    saveScenarioBtn: {
-        flex: 1,
-        backgroundColor: '#ffffff',
-        borderWidth: 1,
-        borderColor: '#d8b4fe',
-        borderRadius: 12,
-        paddingVertical: 10,
-        alignItems: 'center',
-    },
-    saveScenarioBtnText: { color: '#6d28d9', fontSize: 12, fontWeight: '800' },
-    compareHint: { color: '#6b7280', fontSize: 12, marginTop: -2, marginBottom: 12, lineHeight: 17 },
+    saveScenarioRow: { flexDirection: 'row', gap: 10, marginTop: 14 },
+    compareHint: { color: appTheme.colors.textSecondary, fontSize: 12, marginTop: -2, marginBottom: 14, lineHeight: 18, fontWeight: '500' },
     compareTable: {
         borderWidth: 1,
         borderColor: '#e9e5ff',
@@ -960,7 +736,7 @@ const styles = StyleSheet.create({
         overflow: 'hidden',
         backgroundColor: '#fff',
     },
-    compareTableRow: { flexDirection: 'row', borderTopWidth: 1, borderTopColor: '#ede9fe', minHeight: 44 },
+    compareTableRow: { flexDirection: 'row', borderTopWidth: 1, borderTopColor: '#ede9fe', minHeight: 46 },
     compareTableHeaderRow: { borderTopWidth: 0, backgroundColor: '#f5f3ff' },
     compareTableRowLast: {},
     compareMetricCell: {
@@ -983,19 +759,19 @@ const styles = StyleSheet.create({
     },
     compareBaselineValueCell: { backgroundColor: '#f5f3ff' },
     compareHeaderCell: {},
-    compareHeaderText: { color: '#4c1d95', fontWeight: '800', fontSize: 11, textAlign: 'center' },
-    compareHeaderSubText: { color: '#7c3aed', fontWeight: '700', fontSize: 10, textAlign: 'center', marginTop: 2 },
-    compareMetricLabel: { color: '#475569', fontWeight: '700', fontSize: 12 },
+    compareHeaderText: { color: appTheme.colors.brandDark, fontWeight: '800', fontSize: 11, textAlign: 'center' },
+    compareHeaderSubText: { color: appTheme.colors.brand, fontWeight: '700', fontSize: 10, textAlign: 'center', marginTop: 2 },
+    compareMetricLabel: { color: appTheme.colors.textSecondary, fontWeight: '700', fontSize: 12 },
     compareCellPrimary: { color: '#1f2937', fontWeight: '800', fontSize: 15, lineHeight: 18 },
-    compareCellSecondary: { color: '#64748b', fontWeight: '600', fontSize: 10, marginTop: 2, textAlign: 'center' },
-    compareCellText: { color: '#334155', fontWeight: '700', fontSize: 11, textAlign: 'center' },
+    compareCellSecondary: { color: appTheme.colors.textSecondary, fontWeight: '600', fontSize: 10, marginTop: 2, textAlign: 'center' },
+    compareCellText: { color: appTheme.colors.textPrimary, fontWeight: '700', fontSize: 11, textAlign: 'center' },
     divider: { height: 1, backgroundColor: '#ede9fe', marginVertical: 8 },
     forecastHeader: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'flex-start',
-        marginBottom: 16,
+        marginBottom: 14,
     },
     forecastDiff: { fontSize: 17, fontWeight: '800' },
-    forecastSub: { fontSize: 11, color: '#94a3b8', marginTop: 2 },
+    forecastSub: { ...appTheme.typography.overline, color: appTheme.colors.textMuted, marginTop: 2 },
 });

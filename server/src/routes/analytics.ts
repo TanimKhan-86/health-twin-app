@@ -1,48 +1,64 @@
 import { Router, Response } from 'express';
+import { z } from 'zod';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import HealthEntry from '../models/HealthEntry';
 import MoodEntry from '../models/MoodEntry';
+import { shiftUtcDays, toUtcDayStart } from '../lib/dateUtils';
+import { getErrorMessage, sendError, sendSuccess } from '../lib/apiResponse';
+import { parseQuery, QUERY_LIMITS } from '../lib/validation';
 
 const router = Router();
 router.use(authenticate);
 
+const summaryQuerySchema = z.object({
+    days: z.coerce
+        .number()
+        .int()
+        .min(QUERY_LIMITS.days.min)
+        .max(QUERY_LIMITS.days.max)
+        .default(7),
+});
+
 // GET /api/analytics/summary?days=7
 router.get('/summary', async (req: AuthRequest, res: Response): Promise<void> => {
+    const query = parseQuery(res, summaryQuerySchema, req.query);
+    if (!query) return;
+
     try {
-        const days = parseInt(req.query.days as string) || 7;
-        const since = new Date();
-        since.setDate(since.getDate() - days);
+        const today = toUtcDayStart();
+        const since = shiftUtcDays(today, -(query.days - 1));
+        const tomorrow = shiftUtcDays(today, 1);
 
         const [healthEntries, moodEntries] = await Promise.all([
-            HealthEntry.find({ userId: req.userId, date: { $gte: since } }).sort({ date: 1 }),
-            MoodEntry.find({ userId: req.userId, date: { $gte: since } }).sort({ date: 1 }),
+            HealthEntry.find({ userId: req.userId, date: { $gte: since, $lt: tomorrow } }).sort({ date: 1 }),
+            MoodEntry.find({ userId: req.userId, date: { $gte: since, $lt: tomorrow } }).sort({ date: 1 }),
         ]);
 
-        // Compute averages
         const count = healthEntries.length;
-        const avgSteps = count ? Math.round(healthEntries.reduce((s, e) => s + e.steps, 0) / count) : 0;
-        const avgSleep = count ? +(healthEntries.reduce((s, e) => s + e.sleepHours, 0) / count).toFixed(1) : 0;
-        const avgWater = count ? +(healthEntries.reduce((s, e) => s + e.waterLitres, 0) / count).toFixed(1) : 0;
-        const avgHR = count ? Math.round(healthEntries.reduce((s, e) => s + e.heartRate, 0) / count) : 0;
+        const avgSteps = count ? Math.round(healthEntries.reduce((sum, entry) => sum + entry.steps, 0) / count) : 0;
+        const avgSleep = count ? +(healthEntries.reduce((sum, entry) => sum + entry.sleepHours, 0) / count).toFixed(1) : 0;
+        const avgWater = count ? +(healthEntries.reduce((sum, entry) => sum + entry.waterLitres, 0) / count).toFixed(1) : 0;
+        const avgHR = count ? Math.round(healthEntries.reduce((sum, entry) => sum + entry.heartRate, 0) / count) : 0;
 
         const moodCount = moodEntries.length;
-        const avgEnergy = moodCount ? +(moodEntries.reduce((s, e) => s + e.energyLevel, 0) / moodCount).toFixed(1) : 0;
-        const avgStress = moodCount ? +(moodEntries.reduce((s, e) => s + e.stressLevel, 0) / moodCount).toFixed(1) : 0;
+        const avgEnergy = moodCount ? +(moodEntries.reduce((sum, entry) => sum + entry.energyLevel, 0) / moodCount).toFixed(1) : 0;
+        const avgStress = moodCount ? +(moodEntries.reduce((sum, entry) => sum + entry.stressLevel, 0) / moodCount).toFixed(1) : 0;
 
-        // Mood distribution
         const moodDist: Record<string, number> = {};
-        moodEntries.forEach(e => { moodDist[e.mood] = (moodDist[e.mood] || 0) + 1; });
+        moodEntries.forEach((entry) => {
+            moodDist[entry.mood] = (moodDist[entry.mood] || 0) + 1;
+        });
 
-        res.json({
-            period: { days, from: since, to: new Date() },
+        sendSuccess(res, {
+            period: { days: query.days, from: since, to: today },
             health: { count, avgSteps, avgSleep, avgWater, avgHR },
             mood: { count: moodCount, avgEnergy, avgStress, distribution: moodDist },
             healthTimeline: healthEntries,
             moodTimeline: moodEntries,
         });
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: 'Server error' });
+    } catch (error: unknown) {
+        console.error(error);
+        sendError(res, 500, getErrorMessage(error));
     }
 });
 

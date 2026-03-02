@@ -6,44 +6,52 @@ import { useFocusEffect } from '@react-navigation/native';
 import { getHealthHistory, getMoodHistory } from '../../lib/api/auth';
 import { apiFetch } from '../../lib/api/client';
 import { LinearGradient } from 'expo-linear-gradient';
+import type { AppScreenProps } from '../../lib/navigation/types';
+import type { AiWeeklyAnalysisDto } from '../../lib/api/contracts';
 
-interface AIAnalysis {
-    narrative: string;
-    tips: string[];
-    predictedOutcome: string;
-    disclaimer: string;
-    fromCache?: boolean;
-    fromFallback?: boolean;
+type AIAnalysis = AiWeeklyAnalysisDto;
+
+function formatGeneratedAt(value: string | null): string {
+    if (!value) return '—';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '—';
+    return date.toLocaleString([], {
+        day: '2-digit',
+        month: 'short',
+        hour: '2-digit',
+        minute: '2-digit',
+    });
 }
 
-export default function AIWeeklyAnalysisScreen({ navigation }: any) {
+export default function AIWeeklyAnalysisScreen({ navigation }: AppScreenProps<'AIWeeklyAnalysis'>) {
     const [loading, setLoading] = useState(false);
     const [analysis, setAnalysis] = useState<AIAnalysis | null>(null);
+    const [lastGeneratedAt, setLastGeneratedAt] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [healthCount, setHealthCount] = useState(0);
 
     useFocusEffect(useCallback(() => { fetchAnalysis(); }, []));
 
     const fetchAnalysis = async () => {
-        setLoading(true); setError(null); setAnalysis(null);
+        setLoading(true);
+        setError(null);
         try {
             const [healthData, moodData] = await Promise.all([getHealthHistory(7), getMoodHistory(7)]);
-            setHealthCount((healthData as any[]).length);
-            if ((healthData as any[]).length === 0) {
+            setHealthCount(healthData.length);
+            if (healthData.length === 0) {
                 setError('No health data found for this week. Log at least one day first, or use Settings → Seed Demo Data.');
                 setLoading(false); return;
             }
             const response = await apiFetch<AIAnalysis>('/api/ai/weekly-analysis', {
                 method: 'POST', body: JSON.stringify({ healthData, moodData }),
             });
-            if (!response.success || !response.data) throw new Error(response.error || 'Failed to get AI analysis');
+            if (!response.success || !response.data) {
+                const message = response.success ? 'Failed to get AI analysis' : response.error;
+                throw new Error(message);
+            }
 
-            const maybeNested: any = response.data as any;
-            const normalized: AIAnalysis = Array.isArray(maybeNested?.tips)
-                ? maybeNested
-                : maybeNested?.data;
-
-            if (!normalized || !Array.isArray(normalized.tips)) {
+            const normalized: AIAnalysis = response.data;
+            if (!Array.isArray(normalized.tips)) {
                 throw new Error('Analysis returned unexpected format');
             }
 
@@ -51,8 +59,9 @@ export default function AIWeeklyAnalysisScreen({ navigation }: any) {
                 ...normalized,
                 tips: normalized.tips.filter((tip) => typeof tip === 'string'),
             });
-        } catch (err: any) {
-            setError(err?.message || 'Could not generate your analysis. Please check your connection and try again.');
+            setLastGeneratedAt(normalized.generatedAt || new Date().toISOString());
+        } catch (err: unknown) {
+            setError(err instanceof Error ? err.message : 'Could not generate your analysis. Please check your connection and try again.');
         } finally { setLoading(false); }
     };
 
@@ -72,7 +81,7 @@ export default function AIWeeklyAnalysisScreen({ navigation }: any) {
                 <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
 
                     {/* Loading */}
-                    {loading && (
+                    {loading && !analysis && (
                         <View style={styles.stateCard}>
                             <ActivityIndicator size="large" color="#7c3aed" />
                             <Text style={styles.stateTitle}>Analysing your week...</Text>
@@ -82,7 +91,7 @@ export default function AIWeeklyAnalysisScreen({ navigation }: any) {
                     )}
 
                     {/* Error */}
-                    {!loading && error && (
+                    {!analysis && !loading && error && (
                         <View style={styles.stateCard}>
                             <View style={styles.errorIconWrap}><AlertCircle size={32} color="#ef4444" /></View>
                             <Text style={styles.errorTitle}>Analysis Unavailable</Text>
@@ -96,14 +105,29 @@ export default function AIWeeklyAnalysisScreen({ navigation }: any) {
                     )}
 
                     {/* Results */}
-                    {!loading && analysis && (
+                    {analysis && (
                         <>
-                            {/* Source badge */}
-                            <View style={styles.sourceBadge}>
-                                <Text style={styles.sourceBadgeText}>
-                                    {analysis.fromCache ? '⚡ Cached result' : analysis.fromFallback ? '🔒 Smart analysis' : '🤖 Gemini AI'}
-                                </Text>
+                            <View style={styles.metaStack}>
+                                <View style={styles.sourceBadge}>
+                                    <Text style={styles.sourceBadgeText}>
+                                        {analysis.fromCache ? '⚡ Cached result' : analysis.fromFallback ? '🔒 Smart analysis' : '🤖 Gemini AI'}
+                                    </Text>
+                                </View>
+                                <Text style={styles.generatedAtText}>Last generated: {formatGeneratedAt(lastGeneratedAt)}</Text>
+                                {loading && (
+                                    <View style={styles.refreshingBadge}>
+                                        <ActivityIndicator size="small" color="#7c3aed" />
+                                        <Text style={styles.refreshingText}>Refreshing analysis...</Text>
+                                    </View>
+                                )}
                             </View>
+
+                            {error ? (
+                                <View style={styles.inlineError}>
+                                    <AlertCircle size={16} color="#ef4444" />
+                                    <Text style={styles.inlineErrorText}>{error}</Text>
+                                </View>
+                            ) : null}
 
                             {/* Narrative */}
                             <View style={styles.card}>
@@ -186,8 +210,14 @@ const styles = StyleSheet.create({
     retryBtn: { borderRadius: 16, paddingHorizontal: 32, paddingVertical: 14, marginTop: 4 },
     retryText: { color: '#fff', fontWeight: '700', fontSize: 15 },
 
-    sourceBadge: { alignSelf: 'center', backgroundColor: '#f5f3ff', borderRadius: 20, paddingHorizontal: 16, paddingVertical: 6, marginBottom: 12, borderWidth: 1, borderColor: '#e9d5ff' },
+    metaStack: { alignItems: 'center', marginBottom: 12, gap: 6 },
+    sourceBadge: { alignSelf: 'center', backgroundColor: '#f5f3ff', borderRadius: 20, paddingHorizontal: 16, paddingVertical: 6, borderWidth: 1, borderColor: '#e9d5ff' },
     sourceBadgeText: { fontSize: 12, color: '#7c3aed', fontWeight: '600' },
+    generatedAtText: { fontSize: 12, color: '#6b7280', fontWeight: '500' },
+    refreshingBadge: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#ede9fe', borderRadius: 14, paddingHorizontal: 10, paddingVertical: 6 },
+    refreshingText: { fontSize: 12, fontWeight: '600', color: '#6d28d9' },
+    inlineError: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#fef2f2', borderColor: '#fecaca', borderWidth: 1, borderRadius: 14, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 12 },
+    inlineErrorText: { flex: 1, color: '#b91c1c', fontSize: 12, lineHeight: 18, fontWeight: '500' },
 
     card: { backgroundColor: '#fff', borderRadius: 20, padding: 20, marginBottom: 12, shadowColor: '#7c3aed', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.07, shadowRadius: 12, elevation: 3, borderWidth: 1, borderColor: '#f3f0ff' },
     cardHeader: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 14 },

@@ -1,7 +1,6 @@
 import express from 'express';
 import multer from 'multer';
-import axios from 'axios';
-import crypto from 'crypto';
+import { z } from 'zod';
 import { authenticate as requireAuth } from '../middleware/auth';
 import { Avatar } from '../models/Avatar';
 import { AvatarAnimation, StateType } from '../models/AvatarAnimation';
@@ -9,6 +8,19 @@ import { generateBaseAvatar, generateStateAnimation } from '../lib/nanobanaServi
 import HealthEntry from '../models/HealthEntry';
 import MoodEntry from '../models/MoodEntry';
 import User from '../models/User';
+import { getUtcDayRange } from '../lib/dateUtils';
+import { getErrorMessage, sendError, sendSuccess } from '../lib/apiResponse';
+import { parseQuery } from '../lib/validation';
+import {
+    AvatarVideoCandidate,
+    chooseAvatarState,
+    computeAvatarFingerprint,
+    isAvatarBasedAnimation,
+    resolveSourceImage,
+    safeMetadata,
+    SourceImage,
+    toDataUri,
+} from '../services/avatarMediaService';
 
 interface AuthRequest extends express.Request {
     userId?: string;
@@ -19,181 +31,21 @@ const router = express.Router();
 type AvatarMode = 'prebuilt' | 'nanobana';
 const NANO_BANA_STATES: StateType[] = ['happy', 'sad', 'sleepy', 'tired'];
 const PREBUILT_STATES: StateType[] = ['happy', 'sad', 'sleepy'];
-const STOCK_SAMPLE_VIDEO_PATTERN = /^https:\/\/storage\.googleapis\.com\/gtv-videos-bucket\/sample\//i;
 const AVATAR_MODE: AvatarMode = (() => {
     const raw = (process.env.AVATAR_MODE || 'prebuilt').trim().toLowerCase();
     if (raw === 'nanobana' || raw === 'live') return 'nanobana';
     return 'prebuilt';
 })();
 const ACTIVE_AVATAR_STATES: StateType[] = AVATAR_MODE === 'nanobana' ? NANO_BANA_STATES : PREBUILT_STATES;
+const avatarStateQuerySchema = z.object({
+    state: z.enum(['happy', 'sad', 'sleepy', 'tired']).optional(),
+    date: z.string().trim().optional(),
+});
 
 const upload = multer({
     storage: multer.memoryStorage(),
     limits: { fileSize: 5 * 1024 * 1024 }, // 5MB max
 });
-
-interface SourceImage {
-    buffer: Buffer;
-    mimetype: string;
-    source: 'upload' | 'profile';
-    profileDataUri?: string;
-}
-
-interface AvatarVideoCandidate {
-    state: StateType;
-    videoUrl: string;
-    duration: number;
-    quality: 'high' | 'standard';
-    loopOptimized: boolean;
-    circularOptimized: boolean;
-    metadata: Record<string, any>;
-}
-
-function safeMetadata(value: unknown): Record<string, any> {
-    return value && typeof value === 'object' ? (value as Record<string, any>) : {};
-}
-
-function computeAvatarFingerprint(avatarImageUrl: string): string {
-    return crypto.createHash('sha256').update(avatarImageUrl).digest('hex');
-}
-
-function isStockFallbackVideo(videoUrl?: string | null): boolean {
-    if (!videoUrl) return true;
-    return STOCK_SAMPLE_VIDEO_PATTERN.test(videoUrl);
-}
-
-function isAvatarBasedAnimation(animation: {
-    videoUrl?: string | null;
-    generationMetadata?: Record<string, any>;
-}, avatarFingerprint?: string | null): boolean {
-    if (!animation.videoUrl) return false;
-    if (isStockFallbackVideo(animation.videoUrl)) return false;
-
-    const metadata = safeMetadata(animation.generationMetadata);
-    const provider = typeof metadata.provider === 'string' ? metadata.provider : '';
-    const animationFingerprint = typeof metadata.avatarFingerprint === 'string' ? metadata.avatarFingerprint : null;
-
-    if (avatarFingerprint) {
-        return animationFingerprint === avatarFingerprint;
-    }
-
-    if (animation.videoUrl.startsWith('data:video/')) return true;
-    return provider === 'nanobana_google'
-        || provider === 'nanobana_reused'
-        || provider === 'nanobana_surrogate'
-        || provider.startsWith('prebuilt_');
-}
-
-function toDataUri(buffer: Buffer, mimetype: string): string {
-    return `data:${mimetype};base64,${buffer.toString('base64')}`;
-}
-
-function parseDataUri(dataUri: string): { buffer: Buffer; mimetype: string } | null {
-    const match = dataUri.match(/^data:([^;]+);base64,(.+)$/);
-    if (!match) return null;
-    return {
-        mimetype: match[1],
-        buffer: Buffer.from(match[2], 'base64'),
-    };
-}
-
-async function resolveSourceImage(req: AuthRequest, userProfileImage?: string | null): Promise<SourceImage> {
-    if (req.file) {
-        return {
-            buffer: req.file.buffer,
-            mimetype: req.file.mimetype || 'image/jpeg',
-            source: 'upload',
-            profileDataUri: toDataUri(req.file.buffer, req.file.mimetype || 'image/jpeg'),
-        };
-    }
-
-    if (!userProfileImage) {
-        throw new Error('No source image available');
-    }
-
-    const parsed = parseDataUri(userProfileImage);
-    if (parsed) {
-        return {
-            buffer: parsed.buffer,
-            mimetype: parsed.mimetype,
-            source: 'profile',
-            profileDataUri: userProfileImage,
-        };
-    }
-
-    const download = await axios.get<ArrayBuffer>(userProfileImage, {
-        responseType: 'arraybuffer',
-        timeout: 30_000,
-    });
-    const mimetype = (download.headers['content-type'] || 'image/jpeg').split(';')[0];
-    const buffer = Buffer.from(download.data);
-    return {
-        buffer,
-        mimetype,
-        source: 'profile',
-        profileDataUri: toDataUri(buffer, mimetype),
-    };
-}
-
-function chooseAvatarState(health: any, mood: any, availableStates: StateType[]): { state: StateType; reasoning: string } {
-    const hasState = (state: StateType): boolean => availableStates.includes(state);
-    const fallbackSadLike = (): StateType => {
-        if (hasState('sad')) return 'sad';
-        return availableStates[0] || 'sad';
-    };
-
-    const sleepHours = Number(health?.sleepHours ?? 0);
-    const stressLevel = Number(mood?.stressLevel ?? 0);
-    const heartRate = Number(health?.heartRate ?? 0);
-    const steps = Number(health?.steps ?? 0);
-    const waterLitres = Number(health?.waterLitres ?? 0);
-    const energyScore = Number(health?.energyScore ?? 0);
-    const moodEnergy = Number(mood?.energyLevel ?? 0);
-    const moodName = typeof mood?.mood === 'string' ? mood.mood.toLowerCase() : '';
-
-    if (sleepHours > 0 && sleepHours <= 4 && hasState('sleepy')) {
-        return { state: 'sleepy', reasoning: `Sleep is low (${sleepHours}h)` };
-    }
-
-    let fatigueSignalSource: string | null = null;
-    if (
-        moodName === 'tired' ||
-        (energyScore > 0 && energyScore <= 45) ||
-        (moodEnergy > 0 && moodEnergy <= 4) ||
-        stressLevel >= 7 ||
-        heartRate >= 95
-    ) {
-        fatigueSignalSource = moodName === 'tired'
-            ? 'mood: tired'
-            : energyScore > 0 && energyScore <= 45
-                ? `energy score ${Math.round(energyScore)}`
-                : moodEnergy > 0 && moodEnergy <= 4
-                    ? `mood energy ${moodEnergy}/10`
-                    : stressLevel >= 7
-                        ? `stress level ${stressLevel}/10`
-                        : `heart rate ${heartRate} bpm`;
-    }
-
-    if (fatigueSignalSource) {
-        if (hasState('tired')) {
-            return { state: 'tired', reasoning: `Low-energy/fatigue signal from ${fatigueSignalSource}` };
-        }
-        return { state: fallbackSadLike(), reasoning: `Low-energy/stress signal from ${fatigueSignalSource}` };
-    }
-
-    let positiveSignals = 0;
-    if (steps >= 8000) positiveSignals += 1;
-    if (sleepHours >= 7) positiveSignals += 1;
-    if (waterLitres >= 2) positiveSignals += 1;
-    if (energyScore >= 70) positiveSignals += 1;
-    if (moodEnergy >= 7) positiveSignals += 1;
-
-    if (positiveSignals >= 2 && hasState('happy')) {
-        return { state: 'happy', reasoning: `Positive daily metrics (${positiveSignals} strong signals)` };
-    }
-
-    return { state: fallbackSadLike(), reasoning: 'Default low/neutral activity state' };
-}
 
 /**
  * POST /api/avatar/setup
@@ -208,11 +60,13 @@ router.post('/setup', requireAuth, upload.single('photo'), async (req: AuthReque
     try {
         const userId = req.userId;
         if (!userId) {
-            return res.status(401).json({ success: false, error: 'Unauthorized' });
+            sendError(res, 401, 'Unauthorized');
+            return;
         }
         const user = await User.findById(userId).select('profileImage');
         if (!user) {
-            return res.status(404).json({ success: false, error: 'User not found' });
+            sendError(res, 404, 'User not found');
+            return;
         }
 
         if (AVATAR_MODE === 'prebuilt') {
@@ -239,31 +93,27 @@ router.post('/setup', requireAuth, upload.single('photo'), async (req: AuthReque
             );
             const hasAllStates = ACTIVE_AVATAR_STATES.every((state) => generatedStates.includes(state));
 
-            return res.json({
-                success: true,
-                data: {
-                    mode: AVATAR_MODE,
-                    avatarId: avatar?._id ?? null,
-                    imageUrl: avatar?.avatarImageUrl ?? null,
-                    profileImage: user.profileImage ?? null,
-                    generatedStates,
-                    pendingStates: ACTIVE_AVATAR_STATES.filter((state) => !generatedStates.includes(state)),
-                    ready: !!avatar && hasAllStates,
-                    message: hasAllStates
-                        ? 'Prebuilt avatar media is ready. Generation API is disabled in prebuilt mode.'
-                        : 'Prebuilt mode is active. Avatar generation API is disabled; seed pre-generated assets for this user.',
-                },
+            sendSuccess(res, {
+                mode: AVATAR_MODE,
+                avatarId: avatar?._id ?? null,
+                imageUrl: avatar?.avatarImageUrl ?? null,
+                profileImage: user.profileImage ?? null,
+                generatedStates,
+                pendingStates: ACTIVE_AVATAR_STATES.filter((state) => !generatedStates.includes(state)),
+                ready: !!avatar && hasAllStates,
+                message: hasAllStates
+                    ? 'Prebuilt avatar media is ready. Generation API is disabled in prebuilt mode.'
+                    : 'Prebuilt mode is active. Avatar generation API is disabled; seed pre-generated assets for this user.',
             });
+            return;
         }
 
         let sourceImage: SourceImage;
         try {
             sourceImage = await resolveSourceImage(req, user.profileImage);
         } catch {
-            return res.status(400).json({
-                success: false,
-                error: 'No photo provided. Upload a photo or set a profile image first.',
-            });
+            sendError(res, 400, 'No photo provided. Upload a photo or set a profile image first.');
+            return;
         }
 
         const { url: avatarUrl, metadata } = await generateBaseAvatar(sourceImage.buffer, sourceImage.mimetype);
@@ -293,7 +143,8 @@ router.post('/setup', requireAuth, upload.single('photo'), async (req: AuthReque
         // Explicitly read avatar back from DB before animation generation (required flow).
         const savedAvatar = await Avatar.findOne({ userId });
         if (!savedAvatar?.avatarImageUrl) {
-            return res.status(500).json({ success: false, error: 'Avatar saved but could not be reloaded from DB' });
+            sendError(res, 500, 'Avatar saved but could not be reloaded from DB');
+            return;
         }
 
         // Generate state videos sequentially to reduce provider rate-limit failures.
@@ -338,8 +189,8 @@ router.post('/setup', requireAuth, upload.single('photo'), async (req: AuthReque
                         avatarFingerprint,
                     },
                 };
-            } catch (error: any) {
-                const reason = error?.message || `Failed generating ${state}`;
+            } catch (error: unknown) {
+                const reason = getErrorMessage(error, `Failed generating ${state}`);
                 console.warn(`[Avatar setup] ${state} generation failed, reusing avatar-based animation: ${reason}`);
 
                 const sameState = avatarVideoPool.find(item => item.state === state);
@@ -400,24 +251,23 @@ router.post('/setup', requireAuth, upload.single('photo'), async (req: AuthReque
         await AvatarAnimation.deleteMany({
             userId,
             stateType: { $nin: ACTIVE_AVATAR_STATES },
-        } as any);
-
-        return res.json({
-            success: true,
-            data: {
-                avatarId: savedAvatar._id,
-                imageUrl: savedAvatar.avatarImageUrl,
-                profileImage: user.profileImage ?? null,
-                stylePreset: savedAvatar.generationMetadata?.stylePreset || 'health_twin_demo_style_v1',
-                mode: AVATAR_MODE,
-                requiredStates: ACTIVE_AVATAR_STATES,
-                animations: generatedAnimations,
-                message: 'Avatar and all emotional loop animations were generated and stored.',
-            },
         });
+
+        sendSuccess(res, {
+            avatarId: savedAvatar._id,
+            imageUrl: savedAvatar.avatarImageUrl,
+            profileImage: user.profileImage ?? null,
+            stylePreset: savedAvatar.generationMetadata?.stylePreset || 'health_twin_demo_style_v1',
+            mode: AVATAR_MODE,
+            requiredStates: ACTIVE_AVATAR_STATES,
+            animations: generatedAnimations,
+            message: 'Avatar and all emotional loop animations were generated and stored.',
+        });
+        return;
     } catch (error) {
         console.error('Avatar setup error:', error);
-        return res.status(500).json({ success: false, error: 'Failed to process avatar generation' });
+        sendError(res, 500, `Failed to process avatar generation: ${getErrorMessage(error)}`);
+        return;
     }
 });
 
@@ -426,24 +276,28 @@ router.post('/setup', requireAuth, upload.single('photo'), async (req: AuthReque
  * Returns exactly one loopable animation URL selected dynamically from daily metrics.
  */
 router.get('/state', requireAuth, async (req: AuthRequest, res) => {
+    const query = parseQuery(res, avatarStateQuerySchema, req.query);
+    if (!query) return;
+
     try {
         const userId = req.userId;
         if (!userId) {
-            return res.status(401).json({ success: false, error: 'Unauthorized' });
+            sendError(res, 401, 'Unauthorized');
+            return;
         }
 
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
+        const { start: todayStartUtc, end: tomorrowStartUtc } = getUtcDayRange(query.date);
 
         const [avatar, animations, health, mood] = await Promise.all([
             Avatar.findOne({ userId }),
             AvatarAnimation.find({ userId, stateType: { $in: ACTIVE_AVATAR_STATES } }),
-            HealthEntry.findOne({ userId, date: { $gte: today } }).sort({ updatedAt: -1, createdAt: -1 }),
-            MoodEntry.findOne({ userId, date: { $gte: today } }).sort({ updatedAt: -1, createdAt: -1 }),
+            HealthEntry.findOne({ userId, date: { $gte: todayStartUtc, $lt: tomorrowStartUtc } }).sort({ updatedAt: -1, createdAt: -1 }),
+            MoodEntry.findOne({ userId, date: { $gte: todayStartUtc, $lt: tomorrowStartUtc } }).sort({ updatedAt: -1, createdAt: -1 }),
         ]);
 
         if (!avatar && animations.length === 0) {
-            return res.status(404).json({ success: false, error: 'No avatar setup found. Please complete setup.' });
+            sendError(res, 404, 'No avatar setup found. Please complete setup.');
+            return;
         }
 
         const avatarFingerprint = avatar?.avatarImageUrl ? computeAvatarFingerprint(avatar.avatarImageUrl) : null;
@@ -460,9 +314,7 @@ router.get('/state', requireAuth, async (req: AuthRequest, res) => {
         }, {} as Record<StateType, string>);
 
         const { state: inferredState, reasoning } = chooseAvatarState(health, mood, ACTIVE_AVATAR_STATES);
-        const requestedStateRaw = typeof req.query.state === 'string'
-            ? req.query.state.trim().toLowerCase()
-            : null;
+        const requestedStateRaw = query.state ?? null;
         const requestedState = requestedStateRaw && ACTIVE_AVATAR_STATES.includes(requestedStateRaw as StateType)
             ? (requestedStateRaw as StateType)
             : null;
@@ -492,26 +344,26 @@ router.get('/state', requireAuth, async (req: AuthRequest, res) => {
             : reasoning;
 
         if (!fallbackVideo && !avatar?.avatarImageUrl) {
-            return res.status(404).json({ success: false, error: 'No avatar media available yet' });
+            sendError(res, 404, 'No avatar media available yet');
+            return;
         }
 
-        return res.json({
-            success: true,
-            data: {
-                state: resolvedState,
-                videoUrl: fallbackVideo,
-                videoByState: animMap,
-                imageUrl: avatar?.avatarImageUrl ?? null,
-                avatarFingerprint,
-                reasoning: resolvedReasoning,
-                mode: AVATAR_MODE,
-                requiredStates: ACTIVE_AVATAR_STATES,
-                availableStates: Object.keys(animMap),
-            },
+        sendSuccess(res, {
+            state: resolvedState,
+            videoUrl: fallbackVideo,
+            videoByState: animMap,
+            imageUrl: avatar?.avatarImageUrl ?? null,
+            avatarFingerprint,
+            reasoning: resolvedReasoning,
+            mode: AVATAR_MODE,
+            requiredStates: ACTIVE_AVATAR_STATES,
+            availableStates: Object.keys(animMap),
         });
+        return;
     } catch (error) {
         console.error('Avatar state fetch error:', error);
-        return res.status(500).json({ success: false, error: 'Failed to fetch avatar state' });
+        sendError(res, 500, `Failed to fetch avatar state: ${getErrorMessage(error)}`);
+        return;
     }
 });
 
@@ -523,7 +375,8 @@ router.get('/status', requireAuth, async (req: AuthRequest, res) => {
     try {
         const userId = req.userId;
         if (!userId) {
-            return res.status(401).json({ success: false, error: 'Unauthorized' });
+            sendError(res, 401, 'Unauthorized');
+            return;
         }
 
         const [avatar, animations] = await Promise.all([
@@ -544,22 +397,21 @@ router.get('/status', requireAuth, async (req: AuthRequest, res) => {
         );
         const hasAllStates = ACTIVE_AVATAR_STATES.every((state) => generatedStates.includes(state));
 
-        return res.json({
-            success: true,
-            data: {
-                hasAvatar: !!avatar,
-                avatarUrl: avatar?.avatarImageUrl,
-                avatarFingerprint,
-                stylePreset: avatar?.generationMetadata?.stylePreset || 'health_twin_demo_style_v1',
-                mode: AVATAR_MODE,
-                requiredStates: ACTIVE_AVATAR_STATES,
-                generatedStates,
-                pendingStates: ACTIVE_AVATAR_STATES.filter((state) => !generatedStates.includes(state)),
-                ready: !!avatar && hasAllStates,
-            },
+        sendSuccess(res, {
+            hasAvatar: !!avatar,
+            avatarUrl: avatar?.avatarImageUrl,
+            avatarFingerprint,
+            stylePreset: avatar?.generationMetadata?.stylePreset || 'health_twin_demo_style_v1',
+            mode: AVATAR_MODE,
+            requiredStates: ACTIVE_AVATAR_STATES,
+            generatedStates,
+            pendingStates: ACTIVE_AVATAR_STATES.filter((state) => !generatedStates.includes(state)),
+            ready: !!avatar && hasAllStates,
         });
+        return;
     } catch (error) {
-        return res.status(500).json({ success: false, error: 'Failed to fetch status' });
+        sendError(res, 500, `Failed to fetch status: ${getErrorMessage(error)}`);
+        return;
     }
 });
 
@@ -572,7 +424,8 @@ router.get('/library', requireAuth, async (req: AuthRequest, res) => {
     try {
         const userId = req.userId;
         if (!userId) {
-            return res.status(401).json({ success: false, error: 'Unauthorized' });
+            sendError(res, 401, 'Unauthorized');
+            return;
         }
 
         const [avatar, animations] = await Promise.all([
@@ -581,7 +434,8 @@ router.get('/library', requireAuth, async (req: AuthRequest, res) => {
         ]);
 
         if (!avatar && animations.length === 0) {
-            return res.status(404).json({ success: false, error: 'No avatar media found. Please complete setup.' });
+            sendError(res, 404, 'No avatar media found. Please complete setup.');
+            return;
         }
 
         const avatarFingerprint = avatar?.avatarImageUrl ? computeAvatarFingerprint(avatar.avatarImageUrl) : null;
@@ -597,19 +451,18 @@ router.get('/library', requireAuth, async (req: AuthRequest, res) => {
             return acc;
         }, {} as Record<StateType, string>);
 
-        return res.json({
-            success: true,
-            data: {
-                mode: AVATAR_MODE,
-                requiredStates: ACTIVE_AVATAR_STATES,
-                imageUrl: avatar?.avatarImageUrl ?? null,
-                videoByState,
-                availableStates: Object.keys(videoByState),
-            },
+        sendSuccess(res, {
+            mode: AVATAR_MODE,
+            requiredStates: ACTIVE_AVATAR_STATES,
+            imageUrl: avatar?.avatarImageUrl ?? null,
+            videoByState,
+            availableStates: Object.keys(videoByState),
         });
+        return;
     } catch (error) {
         console.error('Avatar library fetch error:', error);
-        return res.status(500).json({ success: false, error: 'Failed to fetch avatar library' });
+        sendError(res, 500, `Failed to fetch avatar library: ${getErrorMessage(error)}`);
+        return;
     }
 });
 

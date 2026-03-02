@@ -72,9 +72,9 @@ export const GamificationService = {
             ]);
 
             const currentStreak = streakData?.currentStreak ?? 0;
-            const steps = (todayHealth as any)?.steps ?? 0;
-            const sleepHours = (todayHealth as any)?.sleepHours ?? 0;
-            const energyScore = (todayHealth as any)?.energyScore ?? 0;
+            const steps = todayHealth?.steps ?? 0;
+            const sleepHours = todayHealth?.sleepHours ?? 0;
+            const energyScore = todayHealth?.energyScore ?? 0;
             const hasLoggedToday = todayHealth !== null;
 
             return BADGES.map(badge => {
@@ -89,7 +89,7 @@ export const GamificationService = {
                 }
                 return { ...badge, isUnlocked };
             });
-        } catch (e) {
+        } catch (e: unknown) {
             console.error('[Gamification] Failed to load badge progress:', e);
             return BADGES.map(badge => ({ ...badge, isUnlocked: false }));
         }

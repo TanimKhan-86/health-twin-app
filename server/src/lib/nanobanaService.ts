@@ -104,18 +104,27 @@ function stateInstruction(state: StateType): string {
     return map[state];
 }
 
-function parseGeneratedVideoUri(payload: any): string | null {
+function parseGeneratedVideoUri(payload: unknown): string | null {
+    const source = payload as {
+        response?: {
+            generateVideoResponse?: { generatedSamples?: Array<{ video?: { uri?: unknown } }> };
+            generatedVideos?: Array<{ video?: { uri?: unknown } }>;
+        };
+        generateVideoResponse?: { generatedSamples?: Array<{ video?: { uri?: unknown } }> };
+        generatedVideos?: Array<{ video?: { uri?: unknown } }>;
+    };
+
     return firstString(
-        payload?.response?.generateVideoResponse?.generatedSamples?.[0]?.video?.uri,
-        payload?.response?.generatedVideos?.[0]?.video?.uri,
-        payload?.generateVideoResponse?.generatedSamples?.[0]?.video?.uri,
-        payload?.generatedVideos?.[0]?.video?.uri
+        source.response?.generateVideoResponse?.generatedSamples?.[0]?.video?.uri,
+        source.response?.generatedVideos?.[0]?.video?.uri,
+        source.generateVideoResponse?.generatedSamples?.[0]?.video?.uri,
+        source.generatedVideos?.[0]?.video?.uri
     );
 }
 
 async function createGoogleImageAvatar(imageBuffer: Buffer, mimetype: string): Promise<{ dataUri: string; modelVersion?: string }> {
     const styleReference = resolveStyleReferenceImage();
-    const parts: Array<Record<string, any>> = [
+    const parts: Array<Record<string, unknown>> = [
         {
             text: [
                 'Transform this real face photo into a stylized, high-quality avatar.',
@@ -169,7 +178,11 @@ async function createGoogleImageAvatar(imageBuffer: Buffer, mimetype: string): P
         }
     );
 
-    const part = response.data?.candidates?.[0]?.content?.parts?.find((p: any) => p?.inlineData?.data);
+    const part = response.data?.candidates?.[0]?.content?.parts?.find((candidatePart: unknown) => {
+        if (typeof candidatePart !== 'object' || candidatePart === null) return false;
+        const maybe = candidatePart as { inlineData?: { data?: unknown } };
+        return typeof maybe.inlineData?.data === 'string';
+    });
     const mimeType = part?.inlineData?.mimeType || 'image/png';
     const data = part?.inlineData?.data;
     if (!data) {
@@ -190,7 +203,7 @@ async function startVeoOperation(
     hasReferenceImages: boolean
 ): Promise<string> {
     const durationSeconds = resolveDurationSeconds(NANO_BANA_VIDEO_MODEL, hasReferenceImages);
-    const parameters: Record<string, any> = {
+    const parameters: Record<string, unknown> = {
         aspectRatio: '16:9',
         durationSeconds,
         personGeneration: 'allow_adult',
@@ -289,7 +302,7 @@ async function downloadVideoAsDataUri(videoUri: string): Promise<{ dataUri: stri
 
 export interface BaseAvatarResult {
     url: string;
-    metadata: Record<string, any>;
+    metadata: Record<string, unknown>;
 }
 
 export interface AnimationResult {
@@ -298,7 +311,7 @@ export interface AnimationResult {
     quality: 'high' | 'standard';
     loopOptimized: boolean;
     circularOptimized: boolean;
-    metadata: Record<string, any>;
+    metadata: Record<string, unknown>;
 }
 
 /**
@@ -340,14 +353,15 @@ export async function generateBaseAvatar(imageBuffer: Buffer, mimetype: string):
                 modelVersion: generated.modelVersion || null,
             },
         };
-    } catch (error: any) {
-        console.warn('[NanoBana] Google avatar generation failed, using fallback:', error?.message || error);
+    } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : 'Unknown error';
+        console.warn('[NanoBana] Google avatar generation failed, using fallback:', message);
         const fallbackUrl = fallbackAvatarUrlFromImage(imageBuffer);
         return {
             url: fallbackUrl,
             metadata: {
                 provider: 'nanobana_fallback',
-                reason: error?.message || 'Unknown error',
+                reason: message,
                 stylePreset: NANO_BANA_STYLE_PRESET,
                 quality: 'high',
                 frameTarget: 'circular',
@@ -386,7 +400,7 @@ export async function generateStateAnimation(baseAvatarUrl: string, state: State
         'Keep composition optimized for circular crop.',
     ].join(' ');
 
-    let lastError: any = null;
+    let lastError: unknown = null;
     for (let attempt = 1; attempt <= 3; attempt += 1) {
         try {
             const operationName = await startVeoOperation(prompt, avatarImage, hasReferenceImages);
@@ -415,9 +429,10 @@ export async function generateStateAnimation(baseAvatarUrl: string, state: State
                     attempt,
                 },
             };
-        } catch (error: any) {
+        } catch (error: unknown) {
             lastError = error;
-            const status = Number(error?.response?.status || 0);
+            const maybeAxiosError = error as { response?: { status?: number } };
+            const status = Number(maybeAxiosError?.response?.status || 0);
             if (status === 429 && attempt < 3) {
                 await sleep(attempt === 1 ? 12_000 : 20_000);
                 continue;
@@ -426,6 +441,10 @@ export async function generateStateAnimation(baseAvatarUrl: string, state: State
         }
     }
 
-    const reason = lastError?.response?.data?.error?.message || lastError?.message || 'Unknown error';
+    const maybeResponseError = lastError as {
+        response?: { data?: { error?: { message?: string } } };
+        message?: string;
+    };
+    const reason = maybeResponseError?.response?.data?.error?.message || maybeResponseError?.message || 'Unknown error';
     throw new Error(`Failed to generate "${state}" animation from avatar reference: ${reason}`);
 }

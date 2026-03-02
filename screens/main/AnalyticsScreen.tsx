@@ -1,258 +1,45 @@
-import React, { useState, useCallback } from "react";
+import React, { useMemo, useState } from "react";
 import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator, StyleSheet, useWindowDimensions } from "react-native";
 import { ScreenLayout } from "../../components/ScreenLayout";
-import { ArrowLeft, BarChart2, TrendingUp, ChevronLeft, ChevronRight, Activity } from "lucide-react-native";
+import { BarChart2, TrendingUp, ChevronLeft, ChevronRight, Activity } from "lucide-react-native";
 import { LineChart } from "react-native-gifted-charts";
-import { useFocusEffect } from "@react-navigation/native";
-import { getHealthHistory, getMoodHistory } from "../../lib/api/auth";
-import { LinearGradient } from "expo-linear-gradient";
+import {
+    averageDelta,
+    avg,
+    avgFloat,
+    AVATAR_STATE_META,
+    AvatarState,
+    buildCoverage,
+    buildDistribution,
+    clamp,
+    confidenceLabel,
+    dayKey,
+    deltaColor,
+    filterByRange,
+    formatEffect,
+    formatSigned,
+    getWeekRange,
+    HealthEntry,
+    linearSlope,
+    MoodEntry,
+    qualityColor,
+    shiftDateString,
+    stdDev,
+    XYPoint,
+} from "./analytics/analyticsUtils";
+import { useAnalyticsHistoryData } from "./analytics/useAnalyticsHistoryData";
+import type { AppScreenProps } from "../../lib/navigation/types";
+import { PageHeader } from "../../components/ui/PageHeader";
+import { EmptyState } from "../../components/ui/EmptyState";
+import { appTheme } from "../../lib/theme/tokens";
+import { chartTheme } from "../../lib/theme/charts";
+import { FadeInSection } from "../../components/ui/FadeInSection";
 
-type AvatarState = 'happy' | 'sad' | 'sleepy';
-interface HealthEntry {
-    date: string;
-    steps: number;
-    sleepHours: number;
-    energyScore: number;
-    heartRate?: number;
-    waterLitres?: number;
-}
-interface MoodEntry {
-    date: string;
-    stressLevel: number;
-    mood?: string;
-    energyLevel?: number;
-}
-interface DistributionSummary {
-    counts: Record<AvatarState, number>;
-    percentages: Record<AvatarState, number>;
-    trackedDays: number;
-}
-type XYPoint = { x: number; y: number };
-type ConfidenceQuality = 'Low' | 'Medium' | 'High';
-interface CoverageSummary {
-    totalDays: number;
-    healthDays: number;
-    moodDays: number;
-    completeDays: number;
-    healthCoverage: number;
-    moodCoverage: number;
-    completeCoverage: number;
-    quality: ConfidenceQuality;
-}
-const AVATAR_STATE_META: Record<AvatarState, { label: string; emoji: string; color: string; bg: string }> = {
-    happy: { label: 'Happy', emoji: '😄', color: '#16a34a', bg: '#dcfce7' },
-    sad: { label: 'Sad', emoji: '😔', color: '#2563eb', bg: '#dbeafe' },
-    sleepy: { label: 'Sleepy', emoji: '😴', color: '#7c3aed', bg: '#ede9fe' },
-};
-
-function avg(arr: number[]): number { return arr.length ? Math.round(arr.reduce((a, b) => a + b, 0) / arr.length) : 0; }
-function avgFloat(arr: number[], precision = 1): number {
-    if (!arr.length) return 0;
-    return Number((arr.reduce((a, b) => a + b, 0) / arr.length).toFixed(precision));
-}
-function getWeekRange(offset: number) {
-    const end = new Date(); end.setDate(end.getDate() - offset * 7);
-    const start = new Date(end); start.setDate(start.getDate() - 6);
-    const fmt = (d: Date) => d.toISOString().split('T')[0];
-    return { startDate: fmt(start), endDate: fmt(end) };
-}
-function dayKey(value: string): string {
-    return value.slice(0, 10);
-}
-function filterByRange<T extends { date: string }>(entries: T[], startDate: string, endDate: string): T[] {
-    return entries.filter((e) => {
-        const d = dayKey(e.date);
-        return d >= startDate && d <= endDate;
-    });
-}
-function deltaColor(delta: number | null, betterWhenLower = false): string {
-    if (delta === null) return '#94a3b8';
-    if (delta === 0) return '#6b7280';
-    const isGood = betterWhenLower ? delta < 0 : delta > 0;
-    return isGood ? '#10b981' : '#ef4444';
-}
-function shiftDateString(yyyyMmDd: string, shiftDays: number): string {
-    const d = new Date(`${yyyyMmDd}T00:00:00.000Z`);
-    d.setUTCDate(d.getUTCDate() + shiftDays);
-    return d.toISOString().slice(0, 10);
-}
-function inferAvatarStateFromDay(health?: HealthEntry, mood?: MoodEntry): AvatarState {
-    const sleepHours = Number(health?.sleepHours ?? 0);
-    const stressLevel = Number(mood?.stressLevel ?? 0);
-    const heartRate = Number(health?.heartRate ?? 0);
-    const steps = Number(health?.steps ?? 0);
-    const waterLitres = Number(health?.waterLitres ?? 0);
-    const energyScore = Number(health?.energyScore ?? 0);
-    const moodEnergy = Number(mood?.energyLevel ?? 0);
-    const moodName = typeof mood?.mood === 'string' ? mood.mood.toLowerCase() : '';
-
-    if (sleepHours > 0 && sleepHours <= 4) return 'sleepy';
-
-    const fatigueSignal =
-        moodName === 'tired' ||
-        (energyScore > 0 && energyScore <= 45) ||
-        (moodEnergy > 0 && moodEnergy <= 4) ||
-        stressLevel >= 7 ||
-        heartRate >= 95;
-
-    if (fatigueSignal) return 'sad';
-
-    let positiveSignals = 0;
-    if (steps >= 8000) positiveSignals += 1;
-    if (sleepHours >= 7) positiveSignals += 1;
-    if (waterLitres >= 2) positiveSignals += 1;
-    if (energyScore >= 70) positiveSignals += 1;
-    if (moodEnergy >= 7) positiveSignals += 1;
-
-    if (positiveSignals >= 2) return 'happy';
-    return 'sad';
-}
-function buildDistribution(
-    days: number,
-    endDate: string,
-    healthEntries: HealthEntry[],
-    moodEntries: MoodEntry[]
-): DistributionSummary {
-    const counts: Record<AvatarState, number> = { happy: 0, sad: 0, sleepy: 0 };
-    const startDate = shiftDateString(endDate, -(days - 1));
-    const healthInRange = filterByRange(healthEntries, startDate, endDate);
-    const moodInRange = filterByRange(moodEntries, startDate, endDate);
-
-    const healthByDay = new Map<string, HealthEntry>();
-    const moodByDay = new Map<string, MoodEntry>();
-    for (const h of healthInRange) healthByDay.set(dayKey(h.date), h);
-    for (const m of moodInRange) moodByDay.set(dayKey(m.date), m);
-
-    let trackedDays = 0;
-    for (let i = 0; i < days; i += 1) {
-        const key = shiftDateString(startDate, i);
-        const health = healthByDay.get(key);
-        const mood = moodByDay.get(key);
-        if (!health && !mood) continue;
-        const state = inferAvatarStateFromDay(health, mood);
-        counts[state] += 1;
-        trackedDays += 1;
-    }
-
-    const percentages: Record<AvatarState, number> = {
-        happy: trackedDays ? Math.round((counts.happy / trackedDays) * 100) : 0,
-        sad: trackedDays ? Math.round((counts.sad / trackedDays) * 100) : 0,
-        sleepy: trackedDays ? Math.round((counts.sleepy / trackedDays) * 100) : 0,
-    };
-
-    return { counts, percentages, trackedDays };
-}
-function linearSlope(points: XYPoint[]): number | null {
-    if (points.length < 3) return null;
-    const meanX = points.reduce((sum, point) => sum + point.x, 0) / points.length;
-    const meanY = points.reduce((sum, point) => sum + point.y, 0) / points.length;
-    let num = 0;
-    let den = 0;
-    for (const point of points) {
-        const dx = point.x - meanX;
-        const dy = point.y - meanY;
-        num += dx * dy;
-        den += dx * dx;
-    }
-    if (den === 0) return null;
-    return num / den;
-}
-function confidenceLabel(size: number): string {
-    if (size >= 12) return 'High';
-    if (size >= 6) return 'Medium';
-    return 'Low';
-}
-function formatSigned(value: number | null, precision = 1): string {
-    if (value === null) return 'Not enough data';
-    if (Math.abs(value) < 0.05) return `~${(0).toFixed(precision)}`;
-    return `${value > 0 ? '+' : ''}${value.toFixed(precision)}`;
-}
-function formatEffect(value: number | null, unit: string, precision = 1): string {
-    if (value === null) return 'Not enough data';
-    return `${formatSigned(value, precision)} ${unit}`;
-}
-function clamp(value: number, min: number, max: number): number {
-    return Math.min(max, Math.max(min, value));
-}
-function stdDev(values: number[]): number {
-    if (values.length < 2) return 0;
-    const mean = values.reduce((sum, value) => sum + value, 0) / values.length;
-    const variance = values.reduce((sum, value) => sum + ((value - mean) ** 2), 0) / values.length;
-    return Math.sqrt(variance);
-}
-function averageDelta(values: number[]): number {
-    if (values.length < 2) return 0;
-    let total = 0;
-    for (let i = 1; i < values.length; i += 1) {
-        total += Math.abs(values[i] - values[i - 1]);
-    }
-    return total / (values.length - 1);
-}
-function qualityFromCoverage(coveragePct: number): ConfidenceQuality {
-    if (coveragePct >= 85) return 'High';
-    if (coveragePct >= 60) return 'Medium';
-    return 'Low';
-}
-function qualityColor(quality: ConfidenceQuality): string {
-    if (quality === 'High') return '#16a34a';
-    if (quality === 'Medium') return '#f59e0b';
-    return '#ef4444';
-}
-function buildCoverage(
-    days: number,
-    endDate: string,
-    healthEntries: HealthEntry[],
-    moodEntries: MoodEntry[]
-): CoverageSummary {
-    const startDate = shiftDateString(endDate, -(days - 1));
-    const healthInRange = filterByRange(healthEntries, startDate, endDate);
-    const moodInRange = filterByRange(moodEntries, startDate, endDate);
-    const healthByDay = new Set<string>(healthInRange.map((entry) => dayKey(entry.date)));
-    const moodByDay = new Set<string>(moodInRange.map((entry) => dayKey(entry.date)));
-
-    let healthDays = 0;
-    let moodDays = 0;
-    let completeDays = 0;
-    for (let i = 0; i < days; i += 1) {
-        const key = shiftDateString(startDate, i);
-        const hasHealth = healthByDay.has(key);
-        const hasMood = moodByDay.has(key);
-        if (hasHealth) healthDays += 1;
-        if (hasMood) moodDays += 1;
-        if (hasHealth && hasMood) completeDays += 1;
-    }
-
-    const healthCoverage = Math.round((healthDays / days) * 100);
-    const moodCoverage = Math.round((moodDays / days) * 100);
-    const completeCoverage = Math.round((completeDays / days) * 100);
-    const quality = qualityFromCoverage(completeCoverage);
-
-    return { totalDays: days, healthDays, moodDays, completeDays, healthCoverage, moodCoverage, completeCoverage, quality };
-}
-
-export default function AnalyticsScreen({ navigation }: any) {
+export default function AnalyticsScreen({ navigation }: AppScreenProps<'Analytics'>) {
     const { width: screenWidth } = useWindowDimensions();
-    const [loading, setLoading] = useState(true);
-    const [allHealth, setAllHealth] = useState<HealthEntry[]>([]);
-    const [allMood, setAllMood] = useState<MoodEntry[]>([]);
+    const { loading, allHealth, allMood } = useAnalyticsHistoryData(60);
     const [weekOffset, setWeekOffset] = useState(0);
     const [trendWindow, setTrendWindow] = useState<7 | 30>(7);
-
-    useFocusEffect(useCallback(() => { loadData(); }, []));
-
-    const loadData = async () => {
-        setLoading(true);
-        try {
-            const [health, mood] = await Promise.all([
-                getHealthHistory(60),
-                getMoodHistory(60),
-            ]);
-            setAllHealth(health as any[]);
-            setAllMood(mood as any[]);
-        }
-        catch (e) { console.error("Analytics load", e); }
-        finally { setLoading(false); }
-    };
 
     const { startDate, endDate } = getWeekRange(weekOffset);
     const { startDate: prevStartDate, endDate: prevEndDate } = getWeekRange(weekOffset + 1);
@@ -302,6 +89,23 @@ export default function AnalyticsScreen({ navigation }: any) {
         return key.slice(8, 10);
     };
     const trendChartWidth = Math.max(220, screenWidth - 86);
+    const trendChartProps = useMemo(() => ({
+        height: chartTheme.lineHeight,
+        width: trendChartWidth,
+        thickness: chartTheme.lineThickness,
+        noOfSections: chartTheme.sections,
+        yAxisThickness: 0,
+        xAxisThickness: 1,
+        xAxisColor: chartTheme.axisColor,
+        hideRules: false,
+        rulesColor: chartTheme.rulesColor,
+        yAxisTextStyle: chartTheme.axisText,
+        xAxisLabelTextStyle: chartTheme.axisText,
+        initialSpacing: chartTheme.spacingInset,
+        endSpacing: chartTheme.spacingInset,
+        isAnimated: true,
+        animationDuration: 620,
+    }), [trendChartWidth]);
 
     const sleepTrendData = trendDayKeys.flatMap((key, index) => {
         const entry = trendHealthByDay.get(key);
@@ -489,37 +293,40 @@ export default function AnalyticsScreen({ navigation }: any) {
     return (
         <ScreenLayout gradientBackground>
             <View style={{ flex: 1 }}>
-                <LinearGradient colors={["#6366f1", "#4f46e5"]} style={styles.headerGrad}>
-                    <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-                        <ArrowLeft color="white" size={18} />
-                        <Text style={styles.backText}>Back</Text>
-                    </TouchableOpacity>
-                    <View style={styles.headerRow}>
-                        <View>
-                            <Text style={styles.headerTitle}>Analytics</Text>
-                            <Text style={styles.headerSub}>From MongoDB Atlas ☁️</Text>
-                        </View>
+                <PageHeader
+                    title="Analytics"
+                    subtitle="From MongoDB Atlas"
+                    onBack={() => navigation.goBack()}
+                    gradientColors={["#6366f1", "#4f46e5"]}
+                    rightSlot={(
                         <View style={styles.navRow}>
-                            <TouchableOpacity onPress={() => setWeekOffset(o => o + 1)} style={styles.navBtn}><ChevronLeft color="white" size={18} /></TouchableOpacity>
+                            <TouchableOpacity onPress={() => setWeekOffset(o => o + 1)} style={styles.navBtn}>
+                                <ChevronLeft color="white" size={18} />
+                            </TouchableOpacity>
                             <Text style={styles.navText}>{startDate.slice(5)} – {endDate.slice(5)}</Text>
-                            <TouchableOpacity onPress={() => setWeekOffset(o => Math.max(0, o - 1))} style={[styles.navBtn, weekOffset === 0 && { opacity: 0.3 }]} disabled={weekOffset === 0}><ChevronRight color="white" size={18} /></TouchableOpacity>
+                            <TouchableOpacity onPress={() => setWeekOffset(o => Math.max(0, o - 1))} style={[styles.navBtn, weekOffset === 0 && { opacity: 0.3 }]} disabled={weekOffset === 0}>
+                                <ChevronRight color="white" size={18} />
+                            </TouchableOpacity>
                         </View>
-                    </View>
-                </LinearGradient>
+                    )}
+                />
 
                 <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
                     {loading ? (
-                        <ActivityIndicator size="large" color="#6366f1" style={{ marginTop: 40 }} />
+                        <ActivityIndicator size="large" color={appTheme.colors.brand} style={{ marginTop: 40 }} />
                     ) : weekEntries.length === 0 ? (
                         <View style={styles.emptyCard}>
-                            <View style={[styles.iconWrap, { backgroundColor: '#eef2ff' }]}><Activity size={24} color="#6366f1" /></View>
-                            <Text style={styles.emptyTitle}>No data this week</Text>
-                            <Text style={styles.emptyText}>Log your health in the Daily Log to see analytics here.</Text>
+                            <EmptyState
+                                icon="📊"
+                                title="No data this week"
+                                description="Log your health in the Daily Log to see analytics here."
+                            />
                         </View>
                     ) : (
                         <>
                             {/* Weekly Snapshot */}
-                            <View style={styles.card}>
+                            <FadeInSection delay={40}>
+                                <View style={styles.card}>
                                 <View style={styles.cardHeader}>
                                     <View style={[styles.iconWrapSm, { backgroundColor: '#eef2ff' }]}><Activity size={16} color="#4f46e5" /></View>
                                     <Text style={styles.cardTitle}>Weekly Snapshot</Text>
@@ -558,10 +365,12 @@ export default function AnalyticsScreen({ navigation }: any) {
                                         </Text>
                                     </View>
                                 </View>
-                            </View>
+                                </View>
+                            </FadeInSection>
 
                             {/* Mood / Avatar State Distribution */}
-                            <View style={styles.card}>
+                            <FadeInSection delay={80}>
+                                <View style={styles.card}>
                                 <View style={styles.cardHeader}>
                                     <View style={[styles.iconWrapSm, { backgroundColor: '#f5f3ff' }]}><Text style={{ fontSize: 16 }}>🎭</Text></View>
                                     <Text style={styles.cardTitle}>Mood/Avatar State Distribution</Text>
@@ -603,10 +412,12 @@ export default function AnalyticsScreen({ navigation }: any) {
                                         </View>
                                     );
                                 })}
-                            </View>
+                                </View>
+                            </FadeInSection>
 
                             {/* Trend Charts */}
-                            <View style={styles.card}>
+                            <FadeInSection delay={120}>
+                                <View style={styles.card}>
                                 <View style={styles.cardHeader}>
                                     <View style={[styles.iconWrapSm, { backgroundColor: '#f1f5f9' }]}><BarChart2 size={16} color="#0f172a" /></View>
                                     <Text style={styles.cardTitle}>Trend Charts</Text>
@@ -646,22 +457,10 @@ export default function AnalyticsScreen({ navigation }: any) {
                                         <View style={styles.trendChartWrap}>
                                             <LineChart
                                                 data={sleepTrendData}
-                                                height={130}
-                                                width={trendChartWidth}
-                                                thickness={2.5}
                                                 color="#6366f1"
                                                 dataPointsColor="#6366f1"
                                                 maxValue={12}
-                                                noOfSections={4}
-                                                yAxisThickness={0}
-                                                xAxisThickness={1}
-                                                xAxisColor="#e5e7eb"
-                                                hideRules={false}
-                                                rulesColor="#f3f4f6"
-                                                yAxisTextStyle={styles.chartAxisText}
-                                                xAxisLabelTextStyle={styles.chartAxisText}
-                                                initialSpacing={8}
-                                                endSpacing={8}
+                                                {...trendChartProps}
                                             />
                                         </View>
                                     ) : <Text style={styles.noDataCompact}>No sleep logs in selected range</Text>}
@@ -676,21 +475,9 @@ export default function AnalyticsScreen({ navigation }: any) {
                                         <View style={styles.trendChartWrap}>
                                             <LineChart
                                                 data={stepsTrendData}
-                                                height={130}
-                                                width={trendChartWidth}
-                                                thickness={2.5}
                                                 color="#14b8a6"
                                                 dataPointsColor="#14b8a6"
-                                                noOfSections={4}
-                                                yAxisThickness={0}
-                                                xAxisThickness={1}
-                                                xAxisColor="#e5e7eb"
-                                                hideRules={false}
-                                                rulesColor="#f3f4f6"
-                                                yAxisTextStyle={styles.chartAxisText}
-                                                xAxisLabelTextStyle={styles.chartAxisText}
-                                                initialSpacing={8}
-                                                endSpacing={8}
+                                                {...trendChartProps}
                                             />
                                         </View>
                                     ) : <Text style={styles.noDataCompact}>No step logs in selected range</Text>}
@@ -705,22 +492,10 @@ export default function AnalyticsScreen({ navigation }: any) {
                                         <View style={styles.trendChartWrap}>
                                             <LineChart
                                                 data={energyTrendData}
-                                                height={130}
-                                                width={trendChartWidth}
-                                                thickness={2.5}
                                                 color="#7c3aed"
                                                 dataPointsColor="#7c3aed"
                                                 maxValue={100}
-                                                noOfSections={4}
-                                                yAxisThickness={0}
-                                                xAxisThickness={1}
-                                                xAxisColor="#e5e7eb"
-                                                hideRules={false}
-                                                rulesColor="#f3f4f6"
-                                                yAxisTextStyle={styles.chartAxisText}
-                                                xAxisLabelTextStyle={styles.chartAxisText}
-                                                initialSpacing={8}
-                                                endSpacing={8}
+                                                {...trendChartProps}
                                             />
                                         </View>
                                     ) : <Text style={styles.noDataCompact}>No energy logs in selected range</Text>}
@@ -735,30 +510,21 @@ export default function AnalyticsScreen({ navigation }: any) {
                                         <View style={styles.trendChartWrap}>
                                             <LineChart
                                                 data={stressTrendData}
-                                                height={130}
-                                                width={trendChartWidth}
-                                                thickness={2.5}
                                                 color="#ef4444"
                                                 dataPointsColor="#ef4444"
+                                                {...trendChartProps}
                                                 maxValue={10}
                                                 noOfSections={5}
-                                                yAxisThickness={0}
-                                                xAxisThickness={1}
-                                                xAxisColor="#e5e7eb"
-                                                hideRules={false}
-                                                rulesColor="#f3f4f6"
-                                                yAxisTextStyle={styles.chartAxisText}
-                                                xAxisLabelTextStyle={styles.chartAxisText}
-                                                initialSpacing={8}
-                                                endSpacing={8}
                                             />
                                         </View>
                                     ) : <Text style={styles.noDataCompact}>No stress logs in selected range</Text>}
                                 </View>
-                            </View>
+                                </View>
+                            </FadeInSection>
 
                             {/* Correlation Insights */}
-                            <View style={styles.card}>
+                            <FadeInSection delay={160}>
+                                <View style={styles.card}>
                                 <View style={styles.cardHeader}>
                                     <View style={[styles.iconWrapSm, { backgroundColor: '#ede9fe' }]}><TrendingUp size={16} color="#7c3aed" /></View>
                                     <Text style={styles.cardTitle}>Correlation Insights</Text>
@@ -778,10 +544,12 @@ export default function AnalyticsScreen({ navigation }: any) {
                                         <Text style={styles.correlationMeta}>Confidence: {card.confidence} ({card.samples} matched days)</Text>
                                     </View>
                                 ))}
-                            </View>
+                                </View>
+                            </FadeInSection>
 
                             {/* Consistency Score */}
-                            <View style={styles.card}>
+                            <FadeInSection delay={200}>
+                                <View style={styles.card}>
                                 <View style={styles.cardHeader}>
                                     <View style={[styles.iconWrapSm, { backgroundColor: '#ecfeff' }]}><Activity size={16} color="#0891b2" /></View>
                                     <Text style={styles.cardTitle}>Consistency Score</Text>
@@ -811,10 +579,12 @@ export default function AnalyticsScreen({ navigation }: any) {
                                         </Text>
                                     </View>
                                 </View>
-                            </View>
+                                </View>
+                            </FadeInSection>
 
                             {/* Data Confidence */}
-                            <View style={styles.card}>
+                            <FadeInSection delay={240}>
+                                <View style={styles.card}>
                                 <View style={styles.cardHeader}>
                                     <View style={[styles.iconWrapSm, { backgroundColor: '#f0f9ff' }]}><Text style={{ fontSize: 15 }}>🛡️</Text></View>
                                     <Text style={styles.cardTitle}>Data Confidence</Text>
@@ -843,10 +613,12 @@ export default function AnalyticsScreen({ navigation }: any) {
                                         <Text style={[styles.coverageQualityValue, { color: qualityColor(coverage30.quality) }]}>{coverage30.quality}</Text>
                                     </View>
                                 </View>
-                            </View>
+                                </View>
+                            </FadeInSection>
 
                             {/* Actionable Recommendations */}
-                            <View style={styles.card}>
+                            <FadeInSection delay={280}>
+                                <View style={styles.card}>
                                 <View style={styles.cardHeader}>
                                     <View style={[styles.iconWrapSm, { backgroundColor: '#fffbeb' }]}><Text style={{ fontSize: 15 }}>✅</Text></View>
                                     <Text style={styles.cardTitle}>Actionable Recommendations</Text>
@@ -869,10 +641,12 @@ export default function AnalyticsScreen({ navigation }: any) {
                                     <Text style={styles.futureLinkButtonText}>Use This In Future You</Text>
                                     <Text style={styles.futureLinkButtonSub}>Connect analytics with prediction workflow</Text>
                                 </TouchableOpacity>
-                            </View>
+                                </View>
+                            </FadeInSection>
 
                             {/* Insights */}
-                            <View style={styles.card}>
+                            <FadeInSection delay={320}>
+                                <View style={styles.card}>
                                 <View style={styles.cardHeader}>
                                     <View style={[styles.iconWrapSm, { backgroundColor: '#fffbeb' }]}><Text style={{ fontSize: 16 }}>💡</Text></View>
                                     <Text style={styles.cardTitle}>Key Insights</Text>
@@ -887,7 +661,8 @@ export default function AnalyticsScreen({ navigation }: any) {
                                 <View style={styles.insightAlert}>
                                     <Text style={styles.insightAlertText}>{weekEntries.length < 3 ? "🔍 Log more days to see deeper patterns." : avgEnergy >= 70 ? "✨ You're performing above average!" : "💤 Try getting more sleep — it boosts energy scores."}</Text>
                                 </View>
-                            </View>
+                                </View>
+                            </FadeInSection>
                         </>
                     )}
                 </ScrollView>
@@ -897,84 +672,98 @@ export default function AnalyticsScreen({ navigation }: any) {
 }
 
 const styles = StyleSheet.create({
-    headerGrad: { paddingHorizontal: 20, paddingTop: 10, paddingBottom: 28 },
-    backBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(255,255,255,0.2)', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, alignSelf: 'flex-start', marginBottom: 12 },
-    backText: { color: '#fff', fontWeight: '700' },
-    headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end' },
-    headerTitle: { fontSize: 24, fontWeight: '800', color: '#fff' },
-    headerSub: { fontSize: 13, color: 'rgba(255,255,255,0.75)', marginTop: 4 },
-    navRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: 20, paddingHorizontal: 8, paddingVertical: 4 },
+    navRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.16)', borderRadius: 20, paddingHorizontal: 8, paddingVertical: 4 },
     navBtn: { padding: 4 },
     navText: { color: '#fff', fontWeight: '700', fontSize: 12, marginHorizontal: 4 },
-    scroll: { padding: 16, paddingBottom: 60 },
-    card: { backgroundColor: '#fff', borderRadius: 20, padding: 20, marginBottom: 16, shadowColor: '#6366f1', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.08, shadowRadius: 10, elevation: 3, borderWidth: 1, borderColor: '#eef2ff' },
-    cardHeader: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 20 },
-    iconWrapSm: { width: 32, height: 32, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
-    cardTitle: { fontSize: 16, fontWeight: '700', color: '#1e1b4b' },
-    snapshotGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
-    snapshotCard: { width: '48%', backgroundColor: '#f8fafc', borderWidth: 1, borderColor: '#e2e8f0', borderRadius: 14, paddingHorizontal: 12, paddingVertical: 10 },
-    snapshotLabel: { fontSize: 12, fontWeight: '700', color: '#64748b' },
-    snapshotValue: { fontSize: 20, fontWeight: '900', color: '#1e1b4b', marginTop: 2 },
+    scroll: { padding: appTheme.spacing.lg, paddingBottom: 64, gap: 4 },
+    card: {
+        backgroundColor: appTheme.colors.surface,
+        borderRadius: appTheme.radius.lg,
+        padding: appTheme.spacing.xl,
+        marginBottom: appTheme.spacing.lg,
+        shadowColor: appTheme.colors.brand,
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.08,
+        shadowRadius: 10,
+        elevation: 3,
+        borderWidth: 1,
+        borderColor: appTheme.colors.border,
+    },
+    cardHeader: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: appTheme.spacing.lg },
+    iconWrapSm: {
+        width: 34,
+        height: 34,
+        borderRadius: 11,
+        borderWidth: 1,
+        borderColor: appTheme.colors.border,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    cardTitle: { ...appTheme.typography.h3, fontWeight: '800', color: appTheme.colors.textPrimary },
+    snapshotGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
+    snapshotCard: { width: '48%', backgroundColor: '#f8f9ff', borderWidth: 1, borderColor: appTheme.colors.border, borderRadius: 14, paddingHorizontal: 12, paddingVertical: 12 },
+    snapshotLabel: { fontSize: 12, fontWeight: '700', color: appTheme.colors.textMuted },
+    snapshotValue: { fontSize: 20, fontWeight: '900', color: appTheme.colors.textPrimary, marginTop: 2 },
     snapshotDelta: { fontSize: 11, fontWeight: '700', marginTop: 4 },
-    distributionMetaRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 },
-    distributionMetaText: { color: '#6b7280', fontSize: 11, fontWeight: '600' },
-    distributionRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 12, gap: 10 },
+    distributionMetaRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 14 },
+    distributionMetaText: { color: appTheme.colors.textSecondary, fontSize: 11, fontWeight: '600' },
+    distributionRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 14, gap: 10 },
     distributionStateCol: { width: 92 },
     distributionStatePill: { borderRadius: 999, paddingVertical: 6, paddingHorizontal: 10, alignSelf: 'flex-start' },
     distributionStateText: { fontSize: 11, fontWeight: '800' },
     distributionBarsCol: { flex: 1, gap: 6 },
     distributionBarRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-    distributionBarLabel: { width: 26, color: '#6b7280', fontSize: 11, fontWeight: '700' },
-    distributionTrack: { flex: 1, height: 8, borderRadius: 999, backgroundColor: '#e5e7eb', overflow: 'hidden' },
+    distributionBarLabel: { width: 26, color: appTheme.colors.textSecondary, fontSize: 11, fontWeight: '700' },
+    distributionTrack: { flex: 1, height: 8, borderRadius: 999, backgroundColor: '#e4e9fb', overflow: 'hidden' },
     distributionFill: { height: '100%', borderRadius: 999 },
-    distributionPct: { width: 34, textAlign: 'right', color: '#374151', fontSize: 11, fontWeight: '800' },
-    trendToggleRow: { flexDirection: 'row', backgroundColor: '#f8fafc', borderRadius: 12, borderWidth: 1, borderColor: '#e2e8f0', padding: 4, gap: 6, marginBottom: 10 },
+    distributionPct: { width: 34, textAlign: 'right', color: '#334155', fontSize: 11, fontWeight: '800' },
+    trendToggleRow: { flexDirection: 'row', backgroundColor: '#f8f9ff', borderRadius: 12, borderWidth: 1, borderColor: appTheme.colors.border, padding: 4, gap: 6, marginBottom: 12 },
     trendToggleBtn: { flex: 1, borderRadius: 9, alignItems: 'center', paddingVertical: 8 },
     trendToggleBtnActive: { backgroundColor: '#1e1b4b' },
-    trendToggleText: { fontSize: 12, fontWeight: '700', color: '#475569' },
+    trendToggleText: { fontSize: 12, fontWeight: '700', color: appTheme.colors.textSecondary },
     trendToggleTextActive: { color: '#ffffff' },
-    trendRangeText: { fontSize: 11, color: '#64748b', fontWeight: '600', marginBottom: 12 },
-    trendMetricCard: { borderWidth: 1, borderColor: '#e2e8f0', borderRadius: 14, padding: 12, marginBottom: 10, backgroundColor: '#fcfdff' },
+    trendRangeText: { fontSize: 11, color: appTheme.colors.textSecondary, fontWeight: '600', marginBottom: 12 },
+    trendMetricCard: { borderWidth: 1, borderColor: appTheme.colors.border, borderRadius: 14, padding: 14, marginBottom: 12, backgroundColor: '#fcfdff' },
     trendMetricCardLast: { marginBottom: 0 },
     trendMetricHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
-    trendMetricTitle: { fontSize: 13, fontWeight: '800', color: '#0f172a' },
-    trendMetricSub: { fontSize: 11, color: '#64748b', fontWeight: '600' },
-    trendChartWrap: { marginLeft: -8, height: 145 },
-    chartAxisText: { color: '#94a3b8', fontSize: 10 },
-    noDataCompact: { color: '#94a3b8', fontSize: 12, textAlign: 'center', paddingVertical: 14, fontWeight: '600' },
-    correlationIntro: { color: '#64748b', fontSize: 12, lineHeight: 18, marginBottom: 12 },
-    correlationCard: { backgroundColor: '#fcfdff', borderWidth: 1, borderColor: '#e2e8f0', borderRadius: 14, padding: 12, marginBottom: 10 },
+    trendMetricTitle: { ...appTheme.typography.caption, fontWeight: '800', fontSize: 13, color: appTheme.colors.textPrimary },
+    trendMetricSub: { fontSize: 11, color: appTheme.colors.textSecondary, fontWeight: '600' },
+    trendChartWrap: { marginLeft: -10, height: 148 },
+    chartAxisText: chartTheme.axisText,
+    noDataCompact: { color: appTheme.colors.textMuted, fontSize: 12, textAlign: 'center', paddingVertical: 14, fontWeight: '600' },
+    correlationIntro: { color: appTheme.colors.textSecondary, fontSize: 12, lineHeight: 18, marginBottom: 12 },
+    correlationCard: { backgroundColor: '#fcfdff', borderWidth: 1, borderColor: appTheme.colors.border, borderRadius: 14, padding: 12, marginBottom: 10 },
     correlationCardLast: { marginBottom: 0 },
-    correlationTitle: { fontSize: 13, fontWeight: '800', color: '#0f172a', marginBottom: 3 },
-    correlationStatement: { fontSize: 12, color: '#475569', marginBottom: 4 },
+    correlationTitle: { ...appTheme.typography.caption, fontWeight: '800', fontSize: 13, color: appTheme.colors.textPrimary, marginBottom: 3 },
+    correlationStatement: { ...appTheme.typography.caption, color: appTheme.colors.textSecondary, marginBottom: 4 },
     correlationValue: { fontSize: 18, fontWeight: '900' },
-    correlationMeta: { marginTop: 4, fontSize: 11, color: '#64748b', fontWeight: '600' },
+    correlationMeta: { marginTop: 4, fontSize: 11, color: appTheme.colors.textSecondary, fontWeight: '600' },
     consistencyTopRow: { flexDirection: 'row', alignItems: 'baseline', gap: 10, marginBottom: 6 },
     consistencyMainValue: { fontSize: 30, fontWeight: '900', color: '#0f172a' },
-    consistencyMainLabel: { fontSize: 13, fontWeight: '800' },
-    consistencyHint: { color: '#64748b', fontSize: 12, lineHeight: 18, marginBottom: 12 },
+    consistencyMainLabel: { ...appTheme.typography.caption, fontSize: 13, fontWeight: '800' },
+    consistencyHint: { color: appTheme.colors.textSecondary, fontSize: 12, lineHeight: 18, marginBottom: 12 },
     consistencyBreakdownRow: { flexDirection: 'row', gap: 10 },
-    consistencyPill: { flex: 1, backgroundColor: '#f8fafc', borderWidth: 1, borderColor: '#e2e8f0', borderRadius: 12, paddingVertical: 10, paddingHorizontal: 10 },
-    consistencyPillLabel: { fontSize: 11, fontWeight: '700', color: '#64748b', marginBottom: 3 },
+    consistencyPill: { flex: 1, backgroundColor: '#f8f9ff', borderWidth: 1, borderColor: appTheme.colors.border, borderRadius: 12, paddingVertical: 10, paddingHorizontal: 10 },
+    consistencyPillLabel: { fontSize: 11, fontWeight: '700', color: appTheme.colors.textSecondary, marginBottom: 3 },
     consistencyPillValue: { fontSize: 15, fontWeight: '800', color: '#0f172a' },
-    coverageRow: { flexDirection: 'row', backgroundColor: '#fcfdff', borderWidth: 1, borderColor: '#e2e8f0', borderRadius: 14, padding: 12, marginBottom: 10, alignItems: 'center' },
+    coverageRow: { flexDirection: 'row', backgroundColor: '#fcfdff', borderWidth: 1, borderColor: appTheme.colors.border, borderRadius: 14, padding: 12, marginBottom: 12, alignItems: 'center' },
     coverageRangeCell: { flex: 1, paddingRight: 8 },
-    coverageRangeTitle: { fontSize: 13, fontWeight: '800', color: '#0f172a' },
+    coverageRangeTitle: { ...appTheme.typography.caption, fontSize: 13, fontWeight: '800', color: appTheme.colors.textPrimary },
     coverageRangeValue: { fontSize: 12, fontWeight: '700', color: '#334155', marginTop: 3 },
-    coverageRangeSub: { fontSize: 11, color: '#64748b', marginTop: 3 },
+    coverageRangeSub: { fontSize: 11, color: appTheme.colors.textSecondary, marginTop: 3 },
     coverageQualityCell: { width: 86, alignItems: 'flex-end' },
-    coverageQualityLabel: { fontSize: 11, color: '#64748b', fontWeight: '700' },
+    coverageQualityLabel: { fontSize: 11, color: appTheme.colors.textSecondary, fontWeight: '700' },
     coverageQualityValue: { fontSize: 18, fontWeight: '900', marginTop: 2 },
-    recommendationCard: { backgroundColor: '#fcfdff', borderWidth: 1, borderColor: '#e2e8f0', borderRadius: 14, padding: 12, marginBottom: 10 },
+    recommendationCard: { backgroundColor: '#fcfdff', borderWidth: 1, borderColor: appTheme.colors.border, borderRadius: 14, padding: 12, marginBottom: 10 },
     recommendationCardLast: { marginBottom: 12 },
-    recommendationTitle: { fontSize: 13, fontWeight: '800', color: '#0f172a', marginBottom: 4 },
-    recommendationText: { fontSize: 12, color: '#475569', lineHeight: 18 },
+    recommendationTitle: { ...appTheme.typography.caption, fontSize: 13, fontWeight: '800', color: appTheme.colors.textPrimary, marginBottom: 4 },
+    recommendationText: { fontSize: 12, color: appTheme.colors.textSecondary, lineHeight: 18 },
     futureLinkButton: { backgroundColor: '#1e1b4b', borderRadius: 14, paddingVertical: 12, paddingHorizontal: 14, alignItems: 'center' },
     futureLinkButtonText: { color: '#ffffff', fontSize: 14, fontWeight: '800' },
     futureLinkButtonSub: { color: '#c4b5fd', fontSize: 11, marginTop: 2, fontWeight: '600' },
     insightRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 12 },
-    inLabel: { color: '#6b7280', fontSize: 14, fontWeight: '500' },
-    inVal: { fontWeight: '800', fontSize: 15 },
+    inLabel: { ...appTheme.typography.body, color: appTheme.colors.textSecondary },
+    inVal: { ...appTheme.typography.bodyStrong, fontSize: 15 },
     divider: { height: 1, backgroundColor: '#f3f4f6' },
     insightAlert: { backgroundColor: '#f5f3ff', padding: 16, borderRadius: 14, marginTop: 16, borderLeftWidth: 3, borderLeftColor: '#7c3aed' },
     insightAlertText: { color: '#4c1d95', fontSize: 13, lineHeight: 20, fontWeight: '500' },
