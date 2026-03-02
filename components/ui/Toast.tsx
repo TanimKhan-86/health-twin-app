@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useCallback, useRef, useEffect } from 'react';
 import { View, Text, Animated, Platform } from 'react-native';
-import { Check, X, Bell, Info, AlertTriangle } from 'lucide-react-native';
-import { cn } from '../../lib/utils';
+import { Check, X, Bell, AlertTriangle } from 'lucide-react-native';
+import { useTheme } from '../../lib/design/useTheme';
 
 type ToastType = 'success' | 'error' | 'info' | 'warning';
 
@@ -24,16 +24,15 @@ export const useToast = () => {
 };
 
 export const ToastProvider = ({ children }: { children: React.ReactNode }) => {
+    const { colors, mode } = useTheme();
     const [toast, setToast] = useState<ToastConfig | null>(null);
     const fadeAnim = useRef(new Animated.Value(0)).current;
     const slideAnim = useRef(new Animated.Value(-100)).current;
 
-    // Function to show toast
     const showToast = useCallback((message: string, type: ToastType = 'info') => {
         setToast({ id: Date.now().toString(), message, type });
     }, []);
 
-    // Function to hide toast
     const hideToast = useCallback(() => {
         Animated.parallel([
             Animated.timing(fadeAnim, { toValue: 0, duration: 300, useNativeDriver: true }),
@@ -41,38 +40,37 @@ export const ToastProvider = ({ children }: { children: React.ReactNode }) => {
         ]).start(() => setToast(null));
     }, [fadeAnim, slideAnim]);
 
-    // Effect to handle animation when toast changes
     useEffect(() => {
         if (toast) {
-            // Reset values for entry
             fadeAnim.setValue(0);
             slideAnim.setValue(-100);
 
-            // Animate In: Fade to 1, Slide to nice position
             Animated.parallel([
                 Animated.timing(fadeAnim, { toValue: 1, duration: 400, useNativeDriver: true }),
                 Animated.spring(slideAnim, {
-                    toValue: Platform.OS === 'web' ? 40 : 60, // Top margin
+                    toValue: Platform.OS === 'web' ? 40 : 60,
                     friction: 6,
                     useNativeDriver: true
                 }),
             ]).start();
 
-            // Auto hide after 3 seconds
             const timer = setTimeout(hideToast, 3000);
             return () => clearTimeout(timer);
         }
     }, [toast, hideToast, fadeAnim, slideAnim]);
 
-    // Helper to get Icon
     const getIcon = (type: ToastType) => {
+        const iconProps = { size: 18 };
         switch (type) {
-            case 'success': return <Check size={20} color="#4ade80" />; // Green
-            case 'error': return <X size={20} color="#f87171" />; // Red
-            case 'warning': return <AlertTriangle size={20} color="#facc15" />; // Yellow
-            default: return <Bell size={20} color="#60a5fa" />; // Blue
+            case 'success': return <Check {...iconProps} color={colors.system.green} />;
+            case 'error': return <X {...iconProps} color={colors.system.red} />;
+            case 'warning': return <AlertTriangle {...iconProps} color={colors.system.orange} />;
+            default: return <Bell {...iconProps} color={colors.system.blue} />;
         }
     };
+
+    const bgColor = mode === 'dark' ? 'rgba(255,255,255,0.92)' : 'rgba(0,0,0,0.88)';
+    const textColor = mode === 'dark' ? '#000000' : '#FFFFFF';
 
     return (
         <ToastContext.Provider value={{ showToast }}>
@@ -85,27 +83,35 @@ export const ToastProvider = ({ children }: { children: React.ReactNode }) => {
                         left: 0,
                         right: 0,
                         alignItems: 'center',
-                        zIndex: 9999, // High z-index for overlay
+                        zIndex: 9999,
                         opacity: fadeAnim,
-                        transform: [{ translateY: slideAnim }]
+                        transform: [{ translateY: slideAnim }],
                     }}
                     pointerEvents="none"
                 >
                     <View
-                        className={cn(
-                            "px-6 py-4 rounded-full shadow-2xl flex-row items-center space-x-3 backdrop-blur-md border",
-                            "bg-slate-900/90 dark:bg-white/90 border-white/10 dark:border-slate-200/20"
-                        )}
                         style={{
-                            shadowColor: "#000",
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            gap: 10,
+                            paddingHorizontal: 20,
+                            paddingVertical: 12,
+                            borderRadius: 9999,
+                            backgroundColor: bgColor,
+                            shadowColor: '#000',
                             shadowOffset: { width: 0, height: 4 },
-                            shadowOpacity: 0.3,
-                            shadowRadius: 8,
-                            elevation: 10
+                            shadowOpacity: 0.15,
+                            shadowRadius: 12,
+                            elevation: 10,
                         }}
                     >
                         {getIcon(toast.type)}
-                        <Text className="text-white dark:text-slate-900 font-medium text-base">
+                        <Text style={{
+                            color: textColor,
+                            fontSize: 15,
+                            fontFamily: 'Inter-Medium',
+                            fontWeight: '500',
+                        }}>
                             {toast.message}
                         </Text>
                     </View>

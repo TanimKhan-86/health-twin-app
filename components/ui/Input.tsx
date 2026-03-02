@@ -1,37 +1,54 @@
+import React from "react";
 import { TextInput, TextInputProps, View, Text } from "react-native";
-import { cn } from "../../lib/utils";
+import { useTheme } from "../../lib/design/useTheme";
 
 interface InputProps extends TextInputProps {
     label?: string;
     error?: string;
-    containerClassName?: string;
 }
 
-export function Input({
-    className,
-    containerClassName,
-    label,
-    error,
-    ...props
-}: InputProps) {
+export function Input({ label, error, style, ...props }: InputProps) {
+    const { colors, radii, typography: typo } = useTheme();
+
     return (
-        <View className={cn("space-y-2", containerClassName)}>
+        <View style={{ gap: 6 }}>
             {label && (
-                <Text className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                <Text style={{
+                    fontSize: typo.subheadline.fontSize,
+                    lineHeight: typo.subheadline.lineHeight,
+                    fontFamily: 'Inter-Medium',
+                    color: colors.text.secondary,
+                }}>
                     {label}
                 </Text>
             )}
             <TextInput
-                placeholderTextColor="#94a3b8"
-                className={cn(
-                    "flex h-12 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 placeholder:text-slate-400 focus:border-brand-primary focus:border-2",
-                    "dark:bg-slate-800 dark:border-slate-700 dark:text-slate-100 dark:placeholder:text-slate-500",
-                    error && "border-status-error focus:border-status-error",
-                    className
-                )}
+                placeholderTextColor={colors.text.quaternary}
+                style={[
+                    {
+                        height: 44,
+                        borderRadius: radii.md,
+                        borderWidth: 1,
+                        borderColor: error ? colors.system.red : colors.separator,
+                        backgroundColor: colors.background.secondary,
+                        paddingHorizontal: 12,
+                        fontSize: typo.body.fontSize,
+                        fontFamily: 'Inter-Regular',
+                        color: colors.text.primary,
+                    },
+                    style,
+                ]}
                 {...props}
             />
-            {error && <Text className="text-xs text-status-error">{error}</Text>}
+            {error && (
+                <Text style={{
+                    fontSize: typo.caption1.fontSize,
+                    fontFamily: 'Inter-Regular',
+                    color: colors.system.red,
+                }}>
+                    {error}
+                </Text>
+            )}
         </View>
     );
 }

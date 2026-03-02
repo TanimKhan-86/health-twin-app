@@ -1,61 +1,53 @@
 import { useState, useEffect, useMemo } from "react";
-import { View, Text, ScrollView, TouchableOpacity, Dimensions } from "react-native";
+import { View, Text, ScrollView, Pressable, Dimensions } from "react-native";
 import Slider from "@react-native-community/slider";
 import { LineChart } from "react-native-gifted-charts";
 import { ScreenLayout } from "../../components/ScreenLayout";
-import { Card, CardContent } from "../../components/ui/Card";
-import { ArrowLeft, Activity, Moon, Zap, RefreshCw, TrendingUp } from "lucide-react-native";
-import { DigitalTwinAvatar } from "../../components/DigitalTwinAvatar";
+import { Card } from "../../components/ui/Card";
+import { SectionHeader } from "../../components/ui/SectionHeader";
+import { Skeleton } from "../../components/ui/Skeleton";
+import { HealthScoreRing } from "../../components/ui/HealthScoreRing";
+import { ArrowLeft, Moon, RefreshCw, TrendingUp, Footprints } from "lucide-react-native";
 import { calculatePredictedEnergy, predictMoodState, generatePredictionInsight, generateHabitSimulation } from "../../lib/prediction/model";
 import { getHealthHistory } from "../../lib/api/auth";
-
+import { useTheme } from "../../lib/design/useTheme";
 
 const screenWidth = Dimensions.get("window").width;
 
 export default function WhatIfScreen({ navigation }: any) {
+    const { colors, typography: typo, spacing, radii } = useTheme();
     const [loading, setLoading] = useState(true);
 
-    // Baselines (from real data)
-    const [baselinesteps, setBaselineSteps] = useState(5000);
+    const [baselineSteps, setBaselineSteps] = useState(5000);
     const [baselineSleep, setBaselineSleep] = useState(6.5);
     const [baselineEnergy, setBaselineEnergy] = useState(60);
 
-    // Simulation State
     const [simSteps, setSimSteps] = useState(5000);
     const [simSleep, setSimSleep] = useState(6.5);
 
-    // Computed Prediction for "Today"
     const predictedEnergy = useMemo(() => calculatePredictedEnergy(simSleep, simSteps), [simSleep, simSteps]);
     const predictedMood = useMemo(() => predictMoodState(simSleep, predictedEnergy), [simSleep, predictedEnergy]);
 
-    // Computed 30-Day Forecast
     const forecastData = useMemo(() =>
-        generateHabitSimulation(baselineSleep, baselinesteps, simSleep, simSteps, 30),
-        [baselineSleep, baselinesteps, simSleep, simSteps]);
+        generateHabitSimulation(baselineSleep, baselineSteps, simSleep, simSteps, 30),
+        [baselineSleep, baselineSteps, simSleep, simSteps]);
 
-    // Format data for Gifted Charts
-    const chartData = useMemo(() => {
-        return forecastData.map((point) => ({
+    const chartData = useMemo(() =>
+        forecastData.map((point) => ({
             value: point.predictedEnergy,
-            label: point.day % 5 === 0 ? `D${point.day}` : '', // Show label every 5 days
-            dataPointText: point.day === 30 ? point.predictedEnergy.toString() : '',
-        }));
-    }, [forecastData]);
+            label: point.day % 5 === 0 ? `D${point.day}` : '',
+        })),
+        [forecastData]);
 
     const energyDiff = predictedEnergy - baselineEnergy;
     const finalEnergyDiff = forecastData[forecastData.length - 1].predictedEnergy - baselineEnergy;
 
     const narrative = useMemo(() => generatePredictionInsight(
-        baselineEnergy,
-        predictedEnergy,
-        simSleep - baselineSleep,
-        simSteps - baselinesteps
+        baselineEnergy, predictedEnergy,
+        simSleep - baselineSleep, simSteps - baselineSteps
     ), [baselineEnergy, predictedEnergy, simSleep, simSteps]);
 
-    // Load initial data
-    useEffect(() => {
-        loadData();
-    }, []);
+    useEffect(() => { loadData(); }, []);
 
     const loadData = async () => {
         try {
@@ -64,86 +56,117 @@ export default function WhatIfScreen({ navigation }: any) {
                 const h = history as any[];
                 const avgSteps = Math.round(h.reduce((s, e) => s + e.steps, 0) / h.length);
                 const avgSleep = h.reduce((s, e) => s + e.sleepHours, 0) / h.length;
-
                 setBaselineSteps(avgSteps);
                 setBaselineSleep(Number(avgSleep.toFixed(1)));
                 setBaselineEnergy(calculatePredictedEnergy(avgSleep, avgSteps));
                 setSimSteps(avgSteps);
                 setSimSleep(Number(avgSleep.toFixed(1)));
             } else {
-                // No data yet — use sensible defaults
                 setBaselineSteps(6500);
                 setBaselineSleep(7.0);
                 setBaselineEnergy(calculatePredictedEnergy(7.0, 6500));
                 setSimSteps(6500);
                 setSimSleep(7.0);
             }
-        } catch (e) {
-            console.error(e);
-        } finally {
-            setLoading(false);
-        }
+        } catch (e) { console.error(e); }
+        finally { setLoading(false); }
     };
 
-
     const resetSimulation = () => {
-        setSimSteps(baselinesteps);
+        setSimSteps(baselineSteps);
         setSimSleep(baselineSleep);
     };
 
+    const stepsDiff = simSteps - baselineSteps;
+    const sleepDiff = simSleep - baselineSleep;
+
     return (
-        <ScreenLayout gradientBackground>
-            <View className="flex-1">
+        <ScreenLayout>
+            <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
                 {/* Header */}
-                <View className="p-4 pt-2 flex-row items-center space-x-4">
-                    <TouchableOpacity onPress={() => navigation.goBack()} className="flex-row items-center bg-white/20 px-3 py-2 rounded-full">
-                        <ArrowLeft color="white" size={20} />
-                        <Text className="text-white font-bold ml-2">Back</Text>
-                    </TouchableOpacity>
-                    <View>
-                        <Text className="text-white text-xl font-bold">Scenario Explorer</Text>
-                        <Text className="text-teal-200 text-xs text-wrap flex-shrink">See how lifestyle changes affect you</Text>
-                    </View>
+                <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: spacing.base, paddingTop: spacing.sm, gap: 12 }}>
+                    <Pressable onPress={() => navigation.goBack()} hitSlop={10}>
+                        <ArrowLeft size={24} color={colors.brand.primary} />
+                    </Pressable>
+                    <Text style={{ fontSize: typo.largeTitle.fontSize, lineHeight: typo.largeTitle.lineHeight, fontFamily: 'Inter-Bold', fontWeight: '700', color: colors.text.primary }}>
+                        What If
+                    </Text>
                 </View>
+                <Text style={{ paddingHorizontal: spacing.base, marginTop: 4, fontSize: typo.subheadline.fontSize, fontFamily: 'Inter-Regular', color: colors.text.secondary }}>
+                    See how changes affect your health score
+                </Text>
 
-                <ScrollView contentContainerStyle={{ padding: 16 }}>
-                    {/* Avatar Preview */}
-                    <Card className="mb-6 bg-white/10 backdrop-blur-md border-white/20">
-                        <CardContent className="items-center py-8">
-                            <View className="transform scale-75">
-                                <DigitalTwinAvatar />
-                            </View>
-                            <View className="mt-4 bg-white/10 px-4 py-2 rounded-full border border-white/20">
-                                <Text className="text-white font-bold text-lg">{predictedMood}</Text>
-                            </View>
-                            <Text className="text-teal-50 text-center mt-4 text-sm px-4">
-                                {narrative}
-                            </Text>
-                        </CardContent>
-                    </Card>
-
-                    {/* Controls */}
-                    <Card className="bg-white/95 backdrop-blur-sm mb-6">
-                        <CardContent className="p-6 space-y-6">
-                            <View className="flex-row justify-between items-center pb-2 border-b border-gray-100">
-                                <Text className="text-slate-500 font-medium">Adjust Habits</Text>
-                                <TouchableOpacity onPress={resetSimulation} className="flex-row items-center space-x-1">
-                                    <RefreshCw size={14} color="#64748b" />
-                                    <Text className="text-slate-500 text-xs">Reset</Text>
-                                </TouchableOpacity>
-                            </View>
-
-                            {/* Steps Slider */}
-                            <View>
-                                <View className="flex-row justify-between mb-2">
-                                    <View className="flex-row items-center space-x-2">
-                                        <Activity size={16} color="#3b82f6" />
-                                        <Text className="font-medium text-slate-700">Daily Steps</Text>
+                {loading ? (
+                    <View style={{ paddingHorizontal: spacing.base, paddingTop: spacing.lg, gap: spacing.base }}>
+                        <Skeleton width="100%" height={200} borderRadius={radii.md} />
+                        <Skeleton width="100%" height={180} borderRadius={radii.md} />
+                        <Skeleton width="100%" height={240} borderRadius={radii.md} />
+                    </View>
+                ) : (
+                    <>
+                        {/* Score Ring */}
+                        <View style={{ paddingHorizontal: spacing.base, paddingTop: spacing.lg }}>
+                            <Card padding="lg" style={{ alignItems: 'center', gap: 12 }}>
+                                <HealthScoreRing score={predictedEnergy} size={140} strokeWidth={12} />
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                    <View style={{
+                                        paddingHorizontal: 10, paddingVertical: 4, borderRadius: radii.full,
+                                        backgroundColor: energyDiff >= 0 ? colors.system.green + '15' : colors.system.red + '15',
+                                    }}>
+                                        <Text style={{
+                                            fontSize: typo.caption1.fontSize, fontFamily: 'Inter-SemiBold', fontWeight: '600',
+                                            color: energyDiff >= 0 ? colors.system.green : colors.system.red,
+                                        }}>
+                                            {energyDiff >= 0 ? '+' : ''}{energyDiff} pts
+                                        </Text>
                                     </View>
-                                    <View className="items-end">
-                                        <Text className="font-bold text-blue-600 text-lg">{simSteps}</Text>
-                                        <Text className="text-xs text-slate-400">
-                                            {simSteps - baselinesteps > 0 ? '+' : ''}{simSteps - baselinesteps} from avg
+                                    <Text style={{ fontSize: typo.caption1.fontSize, fontFamily: 'Inter-Regular', color: colors.text.tertiary }}>
+                                        vs current
+                                    </Text>
+                                </View>
+                                <Text style={{ fontSize: typo.subheadline.fontSize, fontFamily: 'Inter-Medium', color: colors.text.secondary }}>
+                                    {predictedMood}
+                                </Text>
+                            </Card>
+                        </View>
+
+                        {/* AI Narrative */}
+                        <View style={{ paddingHorizontal: spacing.base, paddingTop: spacing.base }}>
+                            <Card padding="md">
+                                <View style={{ borderLeftWidth: 3, borderLeftColor: colors.brand.primary, paddingLeft: 12 }}>
+                                    <Text style={{ fontSize: typo.subheadline.fontSize, fontFamily: 'Inter-Regular', color: colors.text.primary, lineHeight: 22 }}>
+                                        {narrative}
+                                    </Text>
+                                </View>
+                            </Card>
+                        </View>
+
+                        {/* Controls */}
+                        <SectionHeader
+                            title="Adjust Habits"
+                            action={
+                                <Pressable onPress={resetSimulation} style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                                    <RefreshCw size={12} color={colors.text.secondary} />
+                                    <Text style={{ fontSize: typo.caption1.fontSize, fontFamily: 'Inter-Regular', color: colors.text.secondary }}>Reset</Text>
+                                </Pressable>
+                            }
+                        />
+                        <View style={{ paddingHorizontal: spacing.base, gap: spacing.sm }}>
+                            {/* Steps Slider */}
+                            <Card padding="md">
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 4 }}>
+                                    <View style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: colors.health.activity + '15', alignItems: 'center', justifyContent: 'center' }}>
+                                        <Footprints size={16} color={colors.health.activity} />
+                                    </View>
+                                    <Text style={{ flex: 1, fontSize: typo.body.fontSize, fontFamily: 'Inter-Medium', color: colors.text.primary }}>
+                                        Daily Steps
+                                    </Text>
+                                    <View style={{ alignItems: 'flex-end' }}>
+                                        <Text style={{ fontSize: typo.headline.fontSize, fontFamily: 'Inter-Bold', fontWeight: '700', color: colors.health.activity }}>
+                                            {simSteps.toLocaleString()}
+                                        </Text>
+                                        <Text style={{ fontSize: typo.caption2.fontSize, fontFamily: 'Inter-Regular', color: colors.text.tertiary }}>
+                                            {stepsDiff > 0 ? '+' : ''}{stepsDiff.toLocaleString()} from avg
                                         </Text>
                                     </View>
                                 </View>
@@ -153,22 +176,28 @@ export default function WhatIfScreen({ navigation }: any) {
                                     step={500}
                                     value={simSteps}
                                     onValueChange={setSimSteps}
-                                    minimumTrackTintColor="#3b82f6"
-                                    thumbTintColor="#3b82f6"
+                                    minimumTrackTintColor={colors.health.activity}
+                                    maximumTrackTintColor={colors.fill.tertiary}
+                                    thumbTintColor={colors.health.activity}
+                                    style={{ marginTop: 4 }}
                                 />
-                            </View>
+                            </Card>
 
                             {/* Sleep Slider */}
-                            <View>
-                                <View className="flex-row justify-between mb-2">
-                                    <View className="flex-row items-center space-x-2">
-                                        <Moon size={16} color="#6366f1" />
-                                        <Text className="font-medium text-slate-700">Nightly Sleep</Text>
+                            <Card padding="md">
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 4 }}>
+                                    <View style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: colors.health.sleep + '15', alignItems: 'center', justifyContent: 'center' }}>
+                                        <Moon size={16} color={colors.health.sleep} />
                                     </View>
-                                    <View className="items-end">
-                                        <Text className="font-bold text-indigo-600 text-lg">{simSleep.toFixed(1)}h</Text>
-                                        <Text className="text-xs text-slate-400">
-                                            {simSleep - baselineSleep > 0 ? '+' : ''}{(simSleep - baselineSleep).toFixed(1)}h from avg
+                                    <Text style={{ flex: 1, fontSize: typo.body.fontSize, fontFamily: 'Inter-Medium', color: colors.text.primary }}>
+                                        Nightly Sleep
+                                    </Text>
+                                    <View style={{ alignItems: 'flex-end' }}>
+                                        <Text style={{ fontSize: typo.headline.fontSize, fontFamily: 'Inter-Bold', fontWeight: '700', color: colors.health.sleep }}>
+                                            {simSleep.toFixed(1)}h
+                                        </Text>
+                                        <Text style={{ fontSize: typo.caption2.fontSize, fontFamily: 'Inter-Regular', color: colors.text.tertiary }}>
+                                            {sleepDiff > 0 ? '+' : ''}{sleepDiff.toFixed(1)}h from avg
                                         </Text>
                                     </View>
                                 </View>
@@ -178,60 +207,71 @@ export default function WhatIfScreen({ navigation }: any) {
                                     step={0.5}
                                     value={simSleep}
                                     onValueChange={setSimSleep}
-                                    minimumTrackTintColor="#6366f1"
-                                    thumbTintColor="#6366f1"
+                                    minimumTrackTintColor={colors.health.sleep}
+                                    maximumTrackTintColor={colors.fill.tertiary}
+                                    thumbTintColor={colors.health.sleep}
+                                    style={{ marginTop: 4 }}
                                 />
-                            </View>
-                        </CardContent>
-                    </Card>
+                            </Card>
+                        </View>
 
-                    {/* 30-Day Forecast Chart */}
-                    <Card className="bg-white/95 backdrop-blur-sm mb-10 overflow-hidden">
-                        <CardContent className="p-6">
-                            <View className="flex-row justify-between items-center mb-6">
-                                <View className="flex-row items-center space-x-2">
-                                    <TrendingUp size={20} color="#8b5cf6" />
-                                    <Text className="font-bold text-slate-800 text-lg">30-Day Energy Forecast</Text>
+                        {/* 30-Day Forecast */}
+                        <SectionHeader title="30-Day Forecast" />
+                        <View style={{ paddingHorizontal: spacing.base }}>
+                            <Card padding="md">
+                                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                                        <TrendingUp size={18} color={colors.health.energy} />
+                                        <Text style={{ fontSize: typo.headline.fontSize, fontFamily: 'Inter-SemiBold', color: colors.text.primary }}>
+                                            Energy Projection
+                                        </Text>
+                                    </View>
+                                    <View style={{
+                                        paddingHorizontal: 8, paddingVertical: 3, borderRadius: radii.full,
+                                        backgroundColor: finalEnergyDiff >= 0 ? colors.system.green + '15' : colors.system.red + '15',
+                                    }}>
+                                        <Text style={{
+                                            fontSize: typo.caption1.fontSize, fontFamily: 'Inter-SemiBold', fontWeight: '600',
+                                            color: finalEnergyDiff >= 0 ? colors.system.green : colors.system.red,
+                                        }}>
+                                            {finalEnergyDiff >= 0 ? '+' : ''}{finalEnergyDiff} by Day 30
+                                        </Text>
+                                    </View>
                                 </View>
-                                <View className="items-end">
-                                    <Text className={`text-sm font-bold ${finalEnergyDiff >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                                        {finalEnergyDiff >= 0 ? '+' : ''}{finalEnergyDiff} pts
-                                    </Text>
-                                    <Text className="text-xs text-slate-400">by Day 30</Text>
+                                <View style={{ alignItems: 'center' }}>
+                                    <LineChart
+                                        data={chartData}
+                                        height={180}
+                                        width={screenWidth - 100}
+                                        spacing={(screenWidth - 100) / 30}
+                                        thickness={2.5}
+                                        color={colors.health.energy}
+                                        hideDataPoints
+                                        hideRules
+                                        yAxisThickness={0}
+                                        xAxisThickness={0.5}
+                                        xAxisColor={colors.separator}
+                                        textColor={colors.text.secondary}
+                                        maxValue={100}
+                                        noOfSections={5}
+                                        areaChart
+                                        startFillColor={colors.health.energy + '40'}
+                                        endFillColor={colors.health.energy + '05'}
+                                        startOpacity={0.4}
+                                        endOpacity={0.05}
+                                        curved
+                                        isAnimated
+                                        animationDuration={1000}
+                                    />
                                 </View>
-                            </View>
-
-                            <View className="mt-2 -ml-2">
-                                <LineChart
-                                    data={chartData}
-                                    height={180}
-                                    width={screenWidth - 100}
-                                    spacing={(screenWidth - 100) / 30}
-                                    thickness={3}
-                                    color="#8b5cf6"
-                                    hideDataPoints={true}
-                                    hideRules={false}
-                                    rulesType="solid"
-                                    rulesColor="#f1f5f9"
-                                    yAxisColor="#cbd5e1"
-                                    xAxisColor="#cbd5e1"
-                                    yAxisTextStyle={{ color: '#94a3b8', fontSize: 10 }}
-                                    xAxisLabelTextStyle={{ color: '#94a3b8', fontSize: 10, textAlign: 'center' }}
-                                    maxValue={100}
-                                    noOfSections={5}
-                                    areaChart
-                                    startFillColor="#c4b5fd"
-                                    endFillColor="#f8fafc"
-                                    startOpacity={0.4}
-                                    endOpacity={0.1}
-                                    animationDuration={1000}
-                                    isAnimated
-                                />
-                            </View>
-                        </CardContent>
-                    </Card>
-                </ScrollView>
-            </View>
+                                <Text style={{ textAlign: 'center', fontSize: typo.caption1.fontSize, fontFamily: 'Inter-Regular', color: colors.text.tertiary, marginTop: 8 }}>
+                                    Predicted Energy Score over 30 days
+                                </Text>
+                            </Card>
+                        </View>
+                    </>
+                )}
+            </ScrollView>
         </ScreenLayout>
     );
 }

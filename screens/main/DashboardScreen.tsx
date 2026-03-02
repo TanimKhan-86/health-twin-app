@@ -1,42 +1,75 @@
 import React, { useState, useCallback } from "react";
-import { View, Text, ScrollView, TouchableOpacity, Image } from "react-native";
-
+import { View, Text, ScrollView, Pressable, Image } from "react-native";
 import { ScreenLayout } from "../../components/ScreenLayout";
+import { Card } from "../../components/ui/Card";
+import { HealthScoreRing } from "../../components/ui/HealthScoreRing";
+import { ListItem } from "../../components/ui/ListItem";
+import { SectionHeader } from "../../components/ui/SectionHeader";
+import { AnimatedPressable } from "../../components/ui/AnimatedPressable";
+import { Skeleton } from "../../components/ui/Skeleton";
 import { DigitalTwinAvatar } from "../../components/DigitalTwinAvatar";
-import { Card, CardContent } from "../../components/ui/Card";
-import { Activity, Heart, Moon, Wind, Droplets, Trophy } from "lucide-react-native";
+import { Activity, Heart, Moon, Zap, Sparkles, Trophy, Calendar, Flame } from "lucide-react-native";
 import { useFocusEffect } from "@react-navigation/native";
 import { useAuth } from "../../contexts/AuthContext";
 import { getStreak, getTodayHealth } from "../../lib/api/auth";
+import { useTheme, getScoreColor } from "../../lib/design/useTheme";
 
-
-interface MetricCardProps {
+function MetricCard({ icon, label, value, subValue, color, onPress }: {
     icon: React.ReactNode;
     label: string;
     value: string;
     subValue: string;
     color: string;
-}
+    onPress?: () => void;
+}) {
+    const { colors, typography: typo, radii, shadows } = useTheme();
 
-function MetricCard({ icon, label, value, subValue, color }: MetricCardProps) {
     return (
-        <Card className="flex-1 m-1 bg-white/90 dark:bg-slate-800/90 backdrop-blur-sm shadow-sm border-0">
-            <CardContent className="p-4 items-center space-y-2">
-                <View className={`p-2 rounded-full bg-opacity-10 ${color.replace("text-", "bg-")}`}>
+        <AnimatedPressable onPress={onPress} style={{ flex: 1 }}>
+            <Card padding="md" style={{ alignItems: 'center', gap: 6 }}>
+                <View style={{
+                    width: 36,
+                    height: 36,
+                    borderRadius: 10,
+                    backgroundColor: color + '15',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                }}>
                     {icon}
                 </View>
-                <Text className="text-xl font-bold text-slate-800 dark:text-slate-100">{value}</Text>
-                <Text className="text-xs font-medium text-slate-500 dark:text-slate-400">{label}</Text>
-                <Text className={`text-[10px] font-bold ${color}`}>{subValue}</Text>
-            </CardContent>
-        </Card>
+                <Text style={{
+                    fontSize: typo.title2.fontSize,
+                    fontFamily: 'Inter-Bold',
+                    fontWeight: '700',
+                    color: colors.text.primary,
+                }}>
+                    {value}
+                </Text>
+                <Text style={{
+                    fontSize: typo.caption1.fontSize,
+                    fontFamily: 'Inter-Medium',
+                    color: colors.text.secondary,
+                }}>
+                    {label}
+                </Text>
+                <Text style={{
+                    fontSize: typo.caption2.fontSize,
+                    fontFamily: 'Inter-SemiBold',
+                    color,
+                }}>
+                    {subValue}
+                </Text>
+            </Card>
+        </AnimatedPressable>
     );
 }
 
 export default function DashboardScreen({ navigation }: any) {
     const { user } = useAuth();
+    const { colors, typography: typo, spacing, mode } = useTheme();
     const [streak, setStreak] = useState(0);
     const [todayHealth, setTodayHealth] = useState<any>(null);
+    const [loading, setLoading] = useState(true);
 
     useFocusEffect(
         useCallback(() => {
@@ -46,6 +79,7 @@ export default function DashboardScreen({ navigation }: any) {
 
     const loadDashboard = async () => {
         try {
+            setLoading(true);
             const [streakData, health] = await Promise.all([
                 getStreak(),
                 getTodayHealth(),
@@ -54,179 +88,237 @@ export default function DashboardScreen({ navigation }: any) {
             setTodayHealth(health);
         } catch (e) {
             console.warn('Dashboard load error:', e);
+        } finally {
+            setLoading(false);
         }
     };
 
     const firstName = user?.name?.split(' ')[0] || 'there';
     const initials = user?.name
-        ? user.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
+        ? user.name.split(' ').map((n: string) => n[0]).join('').toUpperCase().slice(0, 2)
         : '?';
 
+    // Calculate overall health score from available data
+    const energyScore = todayHealth?.energyScore ?? 0;
+    const sleepScore = todayHealth?.sleepHours ? Math.min((todayHealth.sleepHours / 8) * 100, 100) : 0;
+    const stepsScore = todayHealth?.steps ? Math.min((todayHealth.steps / 10000) * 100, 100) : 0;
+    const overallScore = todayHealth ? Math.round((energyScore + sleepScore + stepsScore) / 3) : 0;
+
+    const getGreeting = () => {
+        const hour = new Date().getHours();
+        if (hour < 12) return 'Good morning';
+        if (hour < 17) return 'Good afternoon';
+        return 'Good evening';
+    };
+
     return (
-        <ScreenLayout gradientBackground>
-            <ScrollView className="flex-1" contentContainerStyle={{ paddingBottom: 100 }}>
+        <ScreenLayout>
+            <ScrollView
+                style={{ flex: 1 }}
+                contentContainerStyle={{ paddingBottom: 40 }}
+                showsVerticalScrollIndicator={false}
+            >
                 {/* Header */}
-                <View className="p-6 flex-row justify-between items-center">
+                <View style={{
+                    flexDirection: 'row',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    paddingHorizontal: spacing.base,
+                    paddingTop: spacing.sm,
+                    paddingBottom: spacing.base,
+                }}>
                     <View>
-                        <Text className="text-teal-100 font-medium">Good morning,</Text>
-                        <Text className="text-2xl font-bold text-white">{firstName} 👋</Text>
+                        <Text style={{
+                            fontSize: typo.largeTitle.fontSize,
+                            lineHeight: typo.largeTitle.lineHeight,
+                            fontFamily: 'Inter-Bold',
+                            fontWeight: '700',
+                            color: colors.text.primary,
+                        }}>
+                            Today
+                        </Text>
+                        <Text style={{
+                            fontSize: typo.subheadline.fontSize,
+                            fontFamily: 'Inter-Regular',
+                            color: colors.text.secondary,
+                            marginTop: 2,
+                        }}>
+                            {getGreeting()}, {firstName}
+                        </Text>
                     </View>
 
-                    <View className="flex-row space-x-3">
-                        {/* Streak Badge */}
-                        <TouchableOpacity
-                            onPress={() => navigation.navigate('Achievements')}
-                            className="h-10 px-3 rounded-full bg-orange-500/20 border border-orange-500/50 flex-row items-center space-x-1"
-                        >
-                            <Text className="text-lg">🔥</Text>
-                            <Text className="text-white font-bold">{streak}</Text>
-                        </TouchableOpacity>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                        {/* Streak badge */}
+                        {streak > 0 && (
+                            <Pressable
+                                onPress={() => navigation.navigate('ProfileTab', { screen: 'Achievements' })}
+                                style={{
+                                    flexDirection: 'row',
+                                    alignItems: 'center',
+                                    gap: 4,
+                                    paddingHorizontal: 10,
+                                    paddingVertical: 6,
+                                    borderRadius: 9999,
+                                    backgroundColor: colors.system.orange + '15',
+                                }}
+                            >
+                                <Flame size={16} color={colors.system.orange} />
+                                <Text style={{
+                                    fontSize: typo.footnote.fontSize,
+                                    fontFamily: 'Inter-Bold',
+                                    color: colors.system.orange,
+                                }}>
+                                    {streak}
+                                </Text>
+                            </Pressable>
+                        )}
 
-                        {/* Profile Avatar */}
-                        <TouchableOpacity
-                            onPress={() => navigation.navigate("Settings")}
-                            className="h-10 w-10 rounded-full bg-white/20 items-center justify-center border border-white/30 overflow-hidden"
+                        {/* Profile avatar */}
+                        <Pressable
+                            onPress={() => navigation.navigate('ProfileTab', { screen: 'Settings' })}
+                            style={{
+                                width: 36,
+                                height: 36,
+                                borderRadius: 18,
+                                backgroundColor: colors.system.blue + '15',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                overflow: 'hidden',
+                            }}
                         >
-                            {user?.profileImage ? (
+                            {user?.profileImage && (user.profileImage.startsWith('http') || user.profileImage.startsWith('data:')) ? (
                                 <Image
                                     source={{ uri: user.profileImage }}
-                                    style={{ width: 40, height: 40, borderRadius: 20 }}
+                                    style={{ width: 36, height: 36, borderRadius: 18 }}
                                     resizeMode="cover"
                                 />
                             ) : (
-                                <Text className="text-white font-bold text-sm">{initials}</Text>
+                                <Text style={{
+                                    fontSize: typo.footnote.fontSize,
+                                    fontFamily: 'Inter-Bold',
+                                    color: colors.system.blue,
+                                }}>
+                                    {initials}
+                                </Text>
                             )}
-                        </TouchableOpacity>
+                        </Pressable>
                     </View>
                 </View>
 
-                {/* Avatar Section */}
-                <View className="h-[300px] justify-center">
-                    <DigitalTwinAvatar />
-                    <View className="absolute bottom-4 w-full items-center">
-                        <View className="bg-white/10 backdrop-blur-md px-4 py-2 rounded-full border border-white/20">
-                            <Text className="text-white text-sm font-medium">
-                                Your health data is stored securely in the cloud ☁️
-                            </Text>
-                        </View>
-                    </View>
+                {/* Health Score Ring with Avatar */}
+                <View style={{ alignItems: 'center', paddingVertical: spacing.lg }}>
+                    {loading ? (
+                        <Skeleton width={180} height={180} borderRadius={90} />
+                    ) : (
+                        <HealthScoreRing
+                            score={overallScore}
+                            size={180}
+                            strokeWidth={10}
+                            label={overallScore > 0 ? undefined : 'No data'}
+                        >
+                            <DigitalTwinAvatar
+                                size={150}
+                                fallbackImage={
+                                    user?.profileImage && (user.profileImage.startsWith('http') || user.profileImage.startsWith('data:'))
+                                        ? user.profileImage
+                                        : undefined
+                                }
+                            />
+                        </HealthScoreRing>
+                    )}
+                    <Text style={{
+                        fontSize: typo.subheadline.fontSize,
+                        fontFamily: 'Inter-Regular',
+                        color: colors.text.secondary,
+                        marginTop: spacing.sm,
+                        textAlign: 'center',
+                    }}>
+                        {overallScore > 0
+                            ? `Score: ${overallScore} — ${overallScore > 70 ? 'Great' : overallScore > 40 ? 'Moderate' : 'Low'} today`
+                            : 'Log your vitals to see your score'}
+                    </Text>
                 </View>
 
-                {/* Quick Stats Grid */}
-                <View className="px-4">
-                    <Text className="text-white font-semibold mb-4 ml-1">Live Health Metrics</Text>
-                    <View className="flex-row justify-between mb-2">
+                {/* Metrics Grid */}
+                <SectionHeader title="Health Metrics" />
+                <View style={{
+                    flexDirection: 'row',
+                    flexWrap: 'wrap',
+                    paddingHorizontal: spacing.base,
+                    gap: spacing.sm,
+                }}>
+                    <View style={{ width: '48%', flexGrow: 1 }}>
                         <MetricCard
-                            icon={<Heart color="#ef4444" size={20} />}
+                            icon={<Heart color={colors.health.heartRate} size={18} />}
                             label="Heart Rate"
-                            value="72 BPM"
-                            subValue="Normal"
-                            color="text-red-500"
+                            value={todayHealth?.heartRate != null ? `${todayHealth.heartRate}` : '—'}
+                            subValue={todayHealth?.heartRate != null ? (todayHealth.heartRate <= 100 ? 'Normal' : 'Elevated') : 'Log today'}
+                            color={colors.health.heartRate}
                         />
+                    </View>
+                    <View style={{ width: '48%', flexGrow: 1 }}>
                         <MetricCard
-                            icon={<Activity color="#3b82f6" size={20} />}
+                            icon={<Activity color={colors.health.activity} size={18} />}
                             label="Steps"
                             value={todayHealth?.steps != null ? todayHealth.steps.toLocaleString() : '—'}
-                            subValue={todayHealth?.steps != null ? (todayHealth.steps >= 8000 ? 'Great! 🏃' : 'Keep going!') : 'Log today'}
-                            color="text-blue-500"
+                            subValue={todayHealth?.steps != null ? (todayHealth.steps >= 8000 ? 'On track' : 'Keep going') : 'Log today'}
+                            color={colors.health.activity}
                         />
                     </View>
-                    <View className="flex-row justify-between">
+                    <View style={{ width: '48%', flexGrow: 1 }}>
                         <MetricCard
-                            icon={<Moon color="#8b5cf6" size={20} />}
+                            icon={<Moon color={colors.health.sleep} size={18} />}
                             label="Sleep"
                             value={todayHealth?.sleepHours != null ? `${todayHealth.sleepHours}h` : '—'}
-                            subValue={todayHealth?.sleepHours != null ? (todayHealth.sleepHours >= 7 ? 'Well rested 😴' : 'Need more rest') : 'Log today'}
-                            color="text-purple-500"
+                            subValue={todayHealth?.sleepHours != null ? (todayHealth.sleepHours >= 7 ? 'Well rested' : 'Need more') : 'Log today'}
+                            color={colors.health.sleep}
                         />
+                    </View>
+                    <View style={{ width: '48%', flexGrow: 1 }}>
                         <MetricCard
-                            icon={<Droplets color="#06b6d4" size={20} />}
+                            icon={<Zap color={colors.health.energy} size={18} />}
                             label="Energy"
                             value={todayHealth?.energyScore != null ? `${Math.round(todayHealth.energyScore)}` : '—'}
-                            subValue={todayHealth?.energyScore != null ? (todayHealth.energyScore >= 70 ? 'High energy ⚡' : 'Low energy') : 'Log today'}
-                            color="text-cyan-500"
+                            subValue={todayHealth?.energyScore != null ? (todayHealth.energyScore >= 70 ? 'High' : 'Low') : 'Log today'}
+                            color={colors.health.energy}
                         />
                     </View>
                 </View>
 
                 {/* Quick Actions */}
-                <View className="p-6 pt-4 flex-row justify-between">
-                    <TouchableOpacity
-                        className="bg-purple-600/20 p-4 rounded-2xl flex-1 mr-2 items-center border border-purple-500/30"
-                        onPress={() => navigation.navigate('WhatIf')}
-                    >
-                        <Text className="text-purple-200 font-bold">🔮 Future You</Text>
-                    </TouchableOpacity>
-
-                    <TouchableOpacity
-                        className="bg-teal-600/20 p-4 rounded-2xl flex-1 ml-2 items-center border border-teal-500/30"
-                        onPress={() => navigation.navigate('Analytics')}
-                    >
-                        <Text className="text-teal-200 font-bold">📊 Analytics</Text>
-                    </TouchableOpacity>
-                </View>
-
-                {/* Action Buttons */}
-                <View className="p-4 mt-2 space-y-3">
-                    <TouchableOpacity
-                        className="bg-white dark:bg-slate-800 p-4 rounded-xl flex-row items-center justify-between shadow-sm"
-                        onPress={() => navigation.navigate("DataEntry")}
-                    >
-                        <View className="flex-row items-center space-x-3">
-                            <View className="bg-teal-100 dark:bg-teal-900/50 p-2 rounded-full">
-                                <Activity size={20} color="#0d9488" />
-                            </View>
-                            <View>
-                                <Text className="font-bold text-slate-800 dark:text-slate-100">Log Daily Vitals</Text>
-                                <Text className="text-slate-500 dark:text-slate-400 text-xs">Saved to MongoDB ☁️</Text>
-                            </View>
-                        </View>
-                    </TouchableOpacity>
-
-                    <TouchableOpacity
-                        className="bg-white dark:bg-slate-800 p-4 rounded-xl flex-row items-center justify-between shadow-sm"
-                        onPress={() => navigation.navigate("WhatIf")}
-                    >
-                        <View className="flex-row items-center space-x-3">
-                            <View className="bg-indigo-100 dark:bg-indigo-900/50 p-2 rounded-full">
-                                <Wind size={20} color="#4f46e5" />
-                            </View>
-                            <View>
-                                <Text className="font-bold text-slate-800 dark:text-slate-100">What-If Scenarios</Text>
-                                <Text className="text-slate-500 dark:text-slate-400 text-xs">AI Predictions</Text>
-                            </View>
-                        </View>
-                    </TouchableOpacity>
-
-                    <TouchableOpacity
-                        className="bg-white dark:bg-slate-800 p-4 rounded-xl flex-row items-center justify-between shadow-sm"
-                        onPress={() => navigation.navigate("Achievements")}
-                    >
-                        <View className="flex-row items-center space-x-3">
-                            <View className="bg-amber-100 dark:bg-amber-900/50 p-2 rounded-full">
-                                <Trophy size={20} color="#d97706" />
-                            </View>
-                            <View>
-                                <Text className="font-bold text-slate-800 dark:text-slate-100">Achievements</Text>
-                                <Text className="text-slate-500 dark:text-slate-400 text-xs">🔥 {streak} day streak</Text>
-                            </View>
-                        </View>
-                    </TouchableOpacity>
-
-                    <TouchableOpacity
-                        className="bg-white dark:bg-slate-800 p-4 rounded-xl flex-row items-center justify-between shadow-sm"
-                        onPress={() => navigation.navigate("WeeklySummary")}
-                    >
-                        <View className="flex-row items-center space-x-3">
-                            <View className="bg-emerald-100 dark:bg-emerald-900/50 p-2 rounded-full">
-                                <Activity size={20} color="#10b981" />
-                            </View>
-                            <View>
-                                <Text className="font-bold text-slate-800 dark:text-slate-100">Weekly Summary</Text>
-                                <Text className="text-slate-500 dark:text-slate-400 text-xs">Your Twin's Report</Text>
-                            </View>
-                        </View>
-                    </TouchableOpacity>
+                <SectionHeader title="Quick Actions" />
+                <View style={{ paddingHorizontal: spacing.base }}>
+                    <Card padding="none">
+                        <ListItem
+                            icon={<Activity size={16} color="#FFFFFF" />}
+                            iconBackgroundColor={colors.health.activity}
+                            title="Log Daily Vitals"
+                            subtitle="Track your health data"
+                            onPress={() => navigation.navigate("DataEntry")}
+                        />
+                        <ListItem
+                            icon={<Sparkles size={16} color="#FFFFFF" />}
+                            iconBackgroundColor={colors.system.indigo}
+                            title="What-If Scenarios"
+                            subtitle="AI-powered predictions"
+                            onPress={() => navigation.navigate("WhatIf")}
+                        />
+                        <ListItem
+                            icon={<Trophy size={16} color="#FFFFFF" />}
+                            iconBackgroundColor={colors.system.orange}
+                            title="Achievements"
+                            subtitle={streak > 0 ? `${streak} day streak` : 'Start your streak'}
+                            onPress={() => navigation.navigate('ProfileTab', { screen: 'Achievements' })}
+                        />
+                        <ListItem
+                            icon={<Calendar size={16} color="#FFFFFF" />}
+                            iconBackgroundColor={colors.system.green}
+                            title="Weekly Summary"
+                            subtitle="Your health report"
+                            showSeparator={false}
+                            onPress={() => navigation.navigate('InsightsTab', { screen: 'WeeklySummary' })}
+                        />
+                    </Card>
                 </View>
             </ScrollView>
         </ScreenLayout>

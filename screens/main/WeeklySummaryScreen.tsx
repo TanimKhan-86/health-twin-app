@@ -1,11 +1,14 @@
 import React, { useState, useCallback } from "react";
-import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator } from "react-native";
+import { View, Text, ScrollView, Pressable } from "react-native";
 import { ScreenLayout } from "../../components/ScreenLayout";
-import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/Card";
-import { ArrowLeft, Moon, Zap, TrendingUp, TrendingDown, Minus } from "lucide-react-native";
-import { DigitalTwinAvatar } from "../../components/DigitalTwinAvatar";
+import { Card } from "../../components/ui/Card";
+import { MetricRow } from "../../components/ui/MetricRow";
+import { SectionHeader } from "../../components/ui/SectionHeader";
+import { Skeleton } from "../../components/ui/Skeleton";
+import { ArrowLeft, Moon, Zap, TrendingUp, TrendingDown, Minus, Footprints, Star, BarChart2 } from "lucide-react-native";
 import { useFocusEffect } from "@react-navigation/native";
 import { getHealthHistory, getMoodHistory } from "../../lib/api/auth";
+import { useTheme } from "../../lib/design/useTheme";
 
 interface HealthEntry { date: string; steps: number; sleepHours: number; energyScore: number; }
 interface MoodEntry { date: string; mood: string; energyLevel: number; }
@@ -14,29 +17,27 @@ function avg(arr: number[]) {
     return arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
 }
 
-function generateNarrative(health: HealthEntry[], moods: MoodEntry[]): string {
-    if (!health.length) return "Start logging your health data and I'll generate your personal weekly story here! 📊";
+function generateNarrative(health: HealthEntry[]): string {
+    if (!health.length) return "Start logging your health data to see your personal weekly insights here.";
 
     const avgEnergy = avg(health.map(e => e.energyScore));
     const avgSleep = avg(health.map(e => e.sleepHours));
     const avgSteps = avg(health.map(e => e.steps));
 
-
     const energyLabel = avgEnergy >= 75 ? 'excellent' : avgEnergy >= 50 ? 'moderate' : 'low';
     const sleepLabel = avgSleep >= 7.5 ? 'well-rested' : avgSleep >= 6 ? 'somewhat rested' : 'sleep-deprived';
     const stepsLabel = avgSteps >= 8000 ? 'very active' : avgSteps >= 5000 ? 'moderately active' : 'lightly active';
 
-    return `This week, your digital twin observed ${energyLabel} energy levels averaging ${Math.round(avgEnergy)}/100. You were ${sleepLabel} with ${avgSleep.toFixed(1)} hours of sleep per night, and ${stepsLabel} with an average of ${Math.round(avgSteps).toLocaleString()} steps per day. ${avgEnergy >= 65 ? 'Keep up the great work! 💪' : 'Try logging 30 more minutes of sleep each night — it has the biggest impact on your energy score.'}`;
+    return `This week you had ${energyLabel} energy levels averaging ${Math.round(avgEnergy)}/100. You were ${sleepLabel} with ${avgSleep.toFixed(1)} hours of sleep per night, and ${stepsLabel} with ${Math.round(avgSteps).toLocaleString()} daily steps. ${avgEnergy >= 65 ? 'Keep up the great work!' : 'Try getting 30 more minutes of sleep each night for better energy.'}`;
 }
 
 export default function WeeklySummaryScreen({ navigation }: any) {
+    const { colors, typography: typo, spacing, radii } = useTheme();
     const [loading, setLoading] = useState(true);
     const [health, setHealth] = useState<HealthEntry[]>([]);
     const [moods, setMoods] = useState<MoodEntry[]>([]);
 
-    useFocusEffect(
-        useCallback(() => { loadSummary(); }, [])
-    );
+    useFocusEffect(useCallback(() => { loadSummary(); }, []));
 
     const loadSummary = async () => {
         setLoading(true);
@@ -54,7 +55,6 @@ export default function WeeklySummaryScreen({ navigation }: any) {
         }
     };
 
-    // ─── Computed analytics ───────────────────────────────────────────────────
     const avgEnergy = Math.round(avg(health.map(e => e.energyScore)));
     const avgSleep = avg(health.map(e => e.sleepHours)).toFixed(1);
     const avgSteps = Math.round(avg(health.map(e => e.steps)));
@@ -69,113 +69,117 @@ export default function WeeklySummaryScreen({ navigation }: any) {
         return last > first + 5 ? 'improving' : last < first - 5 ? 'declining' : 'stable';
     })();
 
+    const trendColor = trend === 'improving' ? colors.system.green : trend === 'declining' ? colors.system.red : colors.text.secondary;
     const TrendIcon = trend === 'improving' ? TrendingUp : trend === 'declining' ? TrendingDown : Minus;
-    const trendColor = trend === 'improving' ? '#10b981' : trend === 'declining' ? '#ef4444' : '#6b7280';
-    const trendBg = trend === 'improving' ? 'bg-emerald-100' : trend === 'declining' ? 'bg-red-100' : 'bg-gray-100';
 
-    const narrative = generateNarrative(health, moods);
-
-    if (loading) {
-        return (
-            <ScreenLayout gradientBackground>
-                <View className="flex-1 items-center justify-center">
-                    <ActivityIndicator size="large" color="white" />
-                </View>
-            </ScreenLayout>
-        );
-    }
+    const narrative = generateNarrative(health);
 
     const startDate = (() => { const d = new Date(); d.setDate(d.getDate() - 6); return d.toISOString().slice(5, 10); })();
     const endDate = new Date().toISOString().slice(5, 10);
 
     return (
-        <ScreenLayout gradientBackground>
-            <View className="flex-1">
+        <ScreenLayout>
+            <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
                 {/* Header */}
-                <View className="p-4 pt-2 flex-row items-center space-x-4">
-                    <TouchableOpacity onPress={() => navigation.goBack()} className="flex-row items-center bg-white/20 px-3 py-2 rounded-full">
-                        <ArrowLeft color="white" size={20} />
-                        <Text className="text-white font-bold ml-2">Back</Text>
-                    </TouchableOpacity>
+                <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: spacing.base, paddingTop: spacing.sm, gap: 12 }}>
+                    <Pressable onPress={() => navigation.goBack()} hitSlop={10}>
+                        <ArrowLeft size={24} color={colors.brand.primary} />
+                    </Pressable>
                     <View>
-                        <Text className="text-white text-xl font-bold">Weekly Report</Text>
-                        <Text className="text-teal-200 text-xs">{startDate} – {endDate} · MongoDB ☁️</Text>
+                        <Text style={{ fontSize: typo.largeTitle.fontSize, lineHeight: typo.largeTitle.lineHeight, fontFamily: 'Inter-Bold', fontWeight: '700', color: colors.text.primary }}>
+                            Weekly Report
+                        </Text>
+                        <Text style={{ fontSize: typo.caption1.fontSize, fontFamily: 'Inter-Regular', color: colors.text.secondary }}>
+                            {startDate} – {endDate}
+                        </Text>
                     </View>
                 </View>
 
-                <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
-
-                    {/* Narrative Card */}
-                    <Card className="mb-6 bg-white/95 backdrop-blur-sm border-white/20">
-                        <CardHeader>
-                            <CardTitle className="text-center text-teal-800">Your Twin's Analysis</CardTitle>
-                        </CardHeader>
-                        <CardContent className="items-center">
-                            <View className="h-40 justify-center">
-                                <DigitalTwinAvatar />
-                            </View>
-                            <View className="bg-teal-50 p-4 rounded-xl border border-teal-100 w-full mt-4">
-                                <Text className="text-slate-700 leading-relaxed font-medium italic">
-                                    "{narrative}"
-                                </Text>
-                            </View>
-                        </CardContent>
-                    </Card>
-
-                    <Text className="text-white font-semibold mb-3 ml-1">Key Highlights</Text>
-
-                    {health.length === 0 ? (
-                        <Card className="bg-white/95">
-                            <CardContent className="p-6 items-center">
-                                <Text className="text-slate-500 text-center">No logs this week. Use the Daily Log screen to start tracking! 📝</Text>
-                            </CardContent>
+                {loading ? (
+                    <View style={{ paddingHorizontal: spacing.base, paddingTop: spacing.lg, gap: spacing.base }}>
+                        <Skeleton width="100%" height={140} borderRadius={radii.md} />
+                        <Skeleton width="100%" height={200} borderRadius={radii.md} />
+                        <Skeleton width="100%" height={120} borderRadius={radii.md} />
+                    </View>
+                ) : health.length === 0 ? (
+                    <View style={{ paddingHorizontal: spacing.base, paddingTop: spacing.xl }}>
+                        <Card padding="lg" style={{ alignItems: 'center', gap: 12, paddingVertical: 40 }}>
+                            <BarChart2 size={36} color={colors.brand.primary} />
+                            <Text style={{ fontSize: typo.title3.fontSize, fontFamily: 'Inter-SemiBold', color: colors.text.primary, textAlign: 'center' }}>
+                                No data this week
+                            </Text>
+                            <Text style={{ fontSize: typo.subheadline.fontSize, fontFamily: 'Inter-Regular', color: colors.text.secondary, textAlign: 'center' }}>
+                                Log your daily vitals to see your weekly report.
+                            </Text>
                         </Card>
-                    ) : (
-                        <View className="space-y-3">
-                            {/* Energy Trend */}
-                            <Card className="flex-row items-center p-4">
-                                <View className={`p-2 rounded-full mr-3 ${trendBg}`}>
+                    </View>
+                ) : (
+                    <>
+                        {/* AI Narrative */}
+                        <View style={{ paddingHorizontal: spacing.base, paddingTop: spacing.lg }}>
+                            <Card padding="md">
+                                <View style={{ borderLeftWidth: 3, borderLeftColor: colors.brand.primary, paddingLeft: 12 }}>
+                                    <Text style={{ fontSize: typo.subheadline.fontSize, fontFamily: 'Inter-Regular', color: colors.text.primary, lineHeight: 22 }}>
+                                        {narrative}
+                                    </Text>
+                                </View>
+                            </Card>
+                        </View>
+
+                        {/* Key Metrics */}
+                        <SectionHeader title="Key Metrics" />
+                        <View style={{ paddingHorizontal: spacing.base }}>
+                            <Card padding="none">
+                                <MetricRow
+                                    icon={<Zap size={16} color={colors.health.energy} />}
+                                    iconColor={colors.health.energy}
+                                    label="Avg Energy"
+                                    value={`${avgEnergy}/100`}
+                                />
+                                <MetricRow
+                                    icon={<Moon size={16} color={colors.health.sleep} />}
+                                    iconColor={colors.health.sleep}
+                                    label="Avg Sleep"
+                                    value={`${avgSleep} hrs`}
+                                />
+                                <MetricRow
+                                    icon={<Footprints size={16} color={colors.health.activity} />}
+                                    iconColor={colors.health.activity}
+                                    label="Avg Steps"
+                                    value={avgSteps.toLocaleString()}
+                                />
+                                <MetricRow
+                                    icon={<Star size={16} color={colors.system.orange} />}
+                                    iconColor={colors.system.orange}
+                                    label="Best Day"
+                                    value={bestDay ? `${bestDay.date.slice(5)} (${Math.round(bestDay.energyScore)})` : 'N/A'}
+                                    showSeparator={false}
+                                />
+                            </Card>
+                        </View>
+
+                        {/* Trend */}
+                        <SectionHeader title="Trend" />
+                        <View style={{ paddingHorizontal: spacing.base }}>
+                            <Card padding="md" style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                                <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: trendColor + '15', alignItems: 'center', justifyContent: 'center' }}>
                                     <TrendIcon size={20} color={trendColor} />
                                 </View>
-                                <View className="flex-1">
-                                    <Text className="text-slate-800 font-bold">Energy Trend</Text>
-                                    <Text className="text-slate-500 text-xs">
-                                        Avg Score: {avgEnergy}/100 ({trend})
+                                <View style={{ flex: 1 }}>
+                                    <Text style={{ fontSize: typo.headline.fontSize, fontFamily: 'Inter-SemiBold', color: colors.text.primary }}>
+                                        Energy is {trend}
+                                    </Text>
+                                    <Text style={{ fontSize: typo.caption1.fontSize, fontFamily: 'Inter-Regular', color: colors.text.secondary, marginTop: 2 }}>
+                                        {trend === 'improving' ? 'Your habits are paying off.' :
+                                         trend === 'declining' ? 'Consider adjusting sleep or activity.' :
+                                         'Consistent performance this week.'}
                                     </Text>
                                 </View>
                             </Card>
-
-                            {/* Sleep & Mood */}
-                            <Card className="flex-row items-center p-4">
-                                <View className="p-2 rounded-full mr-3 bg-indigo-100">
-                                    <Moon size={20} color="#6366f1" />
-                                </View>
-                                <View className="flex-1">
-                                    <Text className="text-slate-800 font-bold">Sleep & Mood</Text>
-                                    <Text className="text-slate-500 text-xs">
-                                        Avg sleep: {avgSleep}h · Avg steps: {avgSteps.toLocaleString()}
-                                    </Text>
-                                </View>
-                            </Card>
-
-                            {/* Best Day */}
-                            {bestDay && (
-                                <Card className="flex-row items-center p-4">
-                                    <View className="p-2 rounded-full mr-3 bg-amber-100">
-                                        <Zap size={20} color="#f59e0b" />
-                                    </View>
-                                    <View className="flex-1">
-                                        <Text className="text-slate-800 font-bold">Peak Performance</Text>
-                                        <Text className="text-slate-500 text-xs">
-                                            Best day: {bestDay.date} (Score: {Math.round(bestDay.energyScore)})
-                                        </Text>
-                                    </View>
-                                </Card>
-                            )}
                         </View>
-                    )}
-                </ScrollView>
-            </View>
+                    </>
+                )}
+            </ScrollView>
         </ScreenLayout>
     );
 }

@@ -1,77 +1,124 @@
-import { Text, TouchableOpacity, TouchableOpacityProps, View } from "react-native";
-import { cva, type VariantProps } from "class-variance-authority";
-import { cn } from "../../lib/utils";
-import clsx from "clsx";
-import { twMerge } from "tailwind-merge";
+import React from "react";
+import { Text, Pressable, PressableProps, ActivityIndicator, View } from "react-native";
+import { useTheme } from "../../lib/design/useTheme";
 
-// Utility for class merging (similar to shadcn/ui) already imported
+type ButtonVariant = 'primary' | 'secondary' | 'destructive' | 'outline' | 'ghost';
+type ButtonSize = 'default' | 'sm' | 'lg' | 'icon';
 
-
-const buttonVariants = cva(
-    "flex-row items-center justify-center rounded-xl px-4 py-3 active:opacity-90",
-    {
-        variants: {
-            variant: {
-                default: "bg-brand-primary",
-                destructive: "bg-status-error",
-                outline: "border border-brand-primary bg-transparent",
-                secondary: "bg-brand-secondary",
-                ghost: "bg-transparent",
-                link: "text-brand-primary underline-offset-4",
-            },
-            size: {
-                default: "h-12",
-                sm: "h-9 px-3",
-                lg: "h-14 px-8",
-                icon: "h-10 w-10 p-0",
-            },
-        },
-        defaultVariants: {
-            variant: "default",
-            size: "default",
-        },
-    }
-);
-
-interface ButtonProps
-    extends TouchableOpacityProps,
-    VariantProps<typeof buttonVariants> {
+interface ButtonProps extends Omit<PressableProps, 'style'> {
+    variant?: ButtonVariant;
+    size?: ButtonSize;
     label?: string;
-    labelClasses?: string;
     icon?: React.ReactNode;
+    isLoading?: boolean;
+    fullWidth?: boolean;
 }
 
 export function Button({
-    className,
-    variant,
-    size,
+    variant = 'primary',
+    size = 'default',
     label,
-    labelClasses,
-    children,
     icon,
+    isLoading = false,
+    fullWidth = false,
+    children,
+    disabled,
     ...props
 }: ButtonProps) {
+    const { colors, radii, shadows, typography: typo } = useTheme();
+
+    const getBackgroundColor = () => {
+        if (disabled || isLoading) {
+            switch (variant) {
+                case 'primary': return colors.system.blue + '80';
+                case 'destructive': return colors.system.red + '80';
+                default: return 'transparent';
+            }
+        }
+        switch (variant) {
+            case 'primary': return colors.system.blue;
+            case 'secondary': return colors.fill.secondary;
+            case 'destructive': return colors.system.red;
+            case 'outline': return 'transparent';
+            case 'ghost': return 'transparent';
+        }
+    };
+
+    const getTextColor = () => {
+        switch (variant) {
+            case 'primary': return '#FFFFFF';
+            case 'destructive': return '#FFFFFF';
+            case 'secondary': return colors.system.blue;
+            case 'outline': return colors.system.blue;
+            case 'ghost': return colors.system.blue;
+        }
+    };
+
+    const getBorderColor = () => {
+        if (variant === 'outline') return colors.separator;
+        return 'transparent';
+    };
+
+    const getHeight = () => {
+        switch (size) {
+            case 'sm': return 36;
+            case 'lg': return 50;
+            case 'icon': return 44;
+            case 'default': return 44;
+        }
+    };
+
+    const getPaddingHorizontal = () => {
+        switch (size) {
+            case 'sm': return 16;
+            case 'lg': return 32;
+            case 'icon': return 0;
+            case 'default': return 20;
+        }
+    };
+
     return (
-        <TouchableOpacity
-            className={cn(buttonVariants({ variant, size, className }))}
+        <Pressable
+            disabled={disabled || isLoading}
+            style={({ pressed }) => [
+                {
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    height: getHeight(),
+                    paddingHorizontal: getPaddingHorizontal(),
+                    backgroundColor: getBackgroundColor(),
+                    borderRadius: size === 'icon' ? radii.md : radii.full,
+                    borderWidth: variant === 'outline' ? 1 : 0,
+                    borderColor: getBorderColor(),
+                    opacity: pressed ? 0.85 : 1,
+                    transform: [{ scale: pressed ? 0.97 : 1 }],
+                    width: size === 'icon' ? 44 : fullWidth ? '100%' : undefined,
+                    minWidth: 44,
+                },
+                variant === 'primary' && !disabled ? shadows.sm : {},
+            ]}
             {...props}
         >
-            {icon && <View className="mr-2">{icon}</View>}
-            {label ? (
-                <Text
-                    className={cn(
-                        "text-white font-medium text-base",
-                        variant === "outline" && "text-brand-primary",
-                        variant === "ghost" && "text-brand-primary",
-                        variant === "link" && "text-brand-primary underline",
-                        labelClasses
-                    )}
-                >
-                    {label}
-                </Text>
+            {isLoading ? (
+                <ActivityIndicator size="small" color={getTextColor()} />
             ) : (
-                children
+                <>
+                    {icon && <View style={{ marginRight: label ? 8 : 0 }}>{icon}</View>}
+                    {label && (
+                        <Text style={{
+                            color: getTextColor(),
+                            fontSize: typo.headline.fontSize,
+                            lineHeight: typo.headline.lineHeight,
+                            fontFamily: 'Inter-SemiBold',
+                            fontWeight: '600',
+                        }}>
+                            {label}
+                        </Text>
+                    )}
+                    {children}
+                </>
             )}
-        </TouchableOpacity>
+        </Pressable>
     );
 }

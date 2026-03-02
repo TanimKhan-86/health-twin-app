@@ -1,40 +1,23 @@
 import React, { useState } from "react";
-import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator } from "react-native";
+import { View, Text, ScrollView, Pressable, ActivityIndicator } from "react-native";
 import Slider from "@react-native-community/slider";
 import { ScreenLayout } from "../../components/ScreenLayout";
-import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/Card";
+import { Card } from "../../components/ui/Card";
 import { Button } from "../../components/ui/Button";
 import { Input } from "../../components/ui/Input";
-import { Activity, Moon, Smile, ArrowLeft, Save, Terminal, Calendar } from "lucide-react-native";
+import { SegmentedControl } from "../../components/ui/SegmentedControl";
+import { Activity, Moon, Smile, ArrowLeft, Save, Calendar, Footprints, Zap } from "lucide-react-native";
 import { logHealth, logMood } from "../../lib/api/auth";
 import { useAuth } from "../../contexts/AuthContext";
 import { useToast } from "../../components/ui/Toast";
+import { useTheme } from "../../lib/design/useTheme";
 
-
-const sections = [
-    {
-        title: "Physical Activity",
-        icon: Activity,
-        color: "bg-blue-500",
-        theme: "blue"
-    },
-    {
-        title: "Sleep & Recovery",
-        icon: Moon,
-        color: "bg-indigo-500",
-        theme: "indigo"
-    },
-    {
-        title: "Mood & Wellness",
-        icon: Smile,
-        color: "bg-orange-500",
-        theme: "orange"
-    }
-];
+const SEGMENTS = ["Activity", "Sleep", "Wellness"];
 
 export default function DataEntryScreen({ navigation }: any) {
     const { user } = useAuth();
     const { showToast } = useToast();
+    const { colors, typography: typo, spacing, radii } = useTheme();
     const [currentSection, setCurrentSection] = useState(0);
     const [saving, setSaving] = useState(false);
 
@@ -45,13 +28,11 @@ export default function DataEntryScreen({ navigation }: any) {
     const [sleepQuality, setSleepQuality] = useState("");
     const [mood, setMood] = useState("");
     const [energy, setEnergy] = useState(5);
-    const [stress, setStress] = useState(3);
 
     const handleNext = async () => {
-        if (currentSection < sections.length - 1) {
+        if (currentSection < SEGMENTS.length - 1) {
             setCurrentSection(currentSection + 1);
         } else {
-            // Last step — save to MongoDB
             setSaving(true);
             try {
                 const today = new Date().toISOString().split('T')[0];
@@ -65,39 +46,60 @@ export default function DataEntryScreen({ navigation }: any) {
                     await logMood({ date: today, mood, energyLevel: energy });
                 }
                 if (result) {
-                    showToast('✅ Vitals saved to MongoDB!', 'success');
-                    setTimeout(() => navigation.goBack(), 800);
+                    showToast('Vitals saved successfully', 'success');
+                    setTimeout(() => navigation.goBack(), 600);
                 } else {
-                    showToast('❌ Save failed — check your connection', 'error');
+                    showToast('Save failed — check connection', 'error');
                 }
             } catch (e) {
                 console.error('Save error:', e);
-                showToast('❌ Error saving data', 'error');
+                showToast('Error saving data', 'error');
             } finally {
                 setSaving(false);
             }
         }
     };
 
+    const qualityOptions = ["Excellent", "Good", "Fair", "Poor"];
+    const moodOptions = [
+        { value: 'happy', label: 'Happy', color: colors.system.green },
+        { value: 'okay', label: 'Okay', color: colors.system.orange },
+        { value: 'sad', label: 'Sad', color: colors.system.red },
+    ];
 
-    const renderSectionContent = () => {
+    const renderSection = () => {
         switch (currentSection) {
-            case 0: // Activity
+            case 0:
                 return (
-                    <View className="space-y-6">
-                        <View>
-                            <Text className="text-sm font-medium text-slate-700 mb-2">Steps Taken</Text>
+                    <View style={{ gap: spacing.lg }}>
+                        <Card padding="md">
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: spacing.base }}>
+                                <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: colors.health.activity + '15', alignItems: 'center', justifyContent: 'center' }}>
+                                    <Footprints size={18} color={colors.health.activity} />
+                                </View>
+                                <Text style={{ fontSize: typo.headline.fontSize, fontFamily: 'Inter-SemiBold', fontWeight: '600', color: colors.text.primary }}>
+                                    Steps
+                                </Text>
+                            </View>
                             <Input
                                 placeholder="e.g. 8500"
                                 keyboardType="numeric"
                                 value={steps}
                                 onChangeText={setSteps}
                             />
-                        </View>
-                        <View>
-                            <View className="flex-row justify-between mb-2">
-                                <Text className="text-sm font-medium text-slate-700">Active Minutes</Text>
-                                <Text className="text-sm font-bold text-brand-primary">{Math.round(activeMinutes)} min</Text>
+                        </Card>
+
+                        <Card padding="md">
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 4 }}>
+                                <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: colors.health.activity + '15', alignItems: 'center', justifyContent: 'center' }}>
+                                    <Activity size={18} color={colors.health.activity} />
+                                </View>
+                                <Text style={{ flex: 1, fontSize: typo.headline.fontSize, fontFamily: 'Inter-SemiBold', fontWeight: '600', color: colors.text.primary }}>
+                                    Active Minutes
+                                </Text>
+                                <Text style={{ fontSize: typo.headline.fontSize, fontFamily: 'Inter-Bold', fontWeight: '700', color: colors.health.activity }}>
+                                    {Math.round(activeMinutes)} min
+                                </Text>
                             </View>
                             <Slider
                                 minimumValue={0}
@@ -105,20 +107,29 @@ export default function DataEntryScreen({ navigation }: any) {
                                 step={5}
                                 value={activeMinutes}
                                 onValueChange={setActiveMinutes}
-                                minimumTrackTintColor="#14b8a6"
-                                maximumTrackTintColor="#cbd5e1"
-                                thumbTintColor="#14b8a6"
+                                minimumTrackTintColor={colors.health.activity}
+                                maximumTrackTintColor={colors.fill.tertiary}
+                                thumbTintColor={colors.health.activity}
+                                style={{ marginTop: 8 }}
                             />
-                        </View>
+                        </Card>
                     </View>
                 );
-            case 1: // Sleep
+
+            case 1:
                 return (
-                    <View className="space-y-6">
-                        <View>
-                            <View className="flex-row justify-between mb-2">
-                                <Text className="text-sm font-medium text-slate-700">Sleep Duration</Text>
-                                <Text className="text-sm font-bold text-brand-primary">{sleepHours.toFixed(1)} hrs</Text>
+                    <View style={{ gap: spacing.lg }}>
+                        <Card padding="md">
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 4 }}>
+                                <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: colors.health.sleep + '15', alignItems: 'center', justifyContent: 'center' }}>
+                                    <Moon size={18} color={colors.health.sleep} />
+                                </View>
+                                <Text style={{ flex: 1, fontSize: typo.headline.fontSize, fontFamily: 'Inter-SemiBold', fontWeight: '600', color: colors.text.primary }}>
+                                    Duration
+                                </Text>
+                                <Text style={{ fontSize: typo.headline.fontSize, fontFamily: 'Inter-Bold', fontWeight: '700', color: colors.health.sleep }}>
+                                    {sleepHours.toFixed(1)} hrs
+                                </Text>
                             </View>
                             <Slider
                                 minimumValue={0}
@@ -126,54 +137,95 @@ export default function DataEntryScreen({ navigation }: any) {
                                 step={0.5}
                                 value={sleepHours}
                                 onValueChange={setSleepHours}
-                                minimumTrackTintColor="#6366f1"
-                                maximumTrackTintColor="#cbd5e1"
-                                thumbTintColor="#6366f1"
+                                minimumTrackTintColor={colors.health.sleep}
+                                maximumTrackTintColor={colors.fill.tertiary}
+                                thumbTintColor={colors.health.sleep}
+                                style={{ marginTop: 8 }}
                             />
-                        </View>
-                        <View>
-                            <Text className="text-sm font-medium text-slate-700 mb-2">Sleep Quality</Text>
-                            <View className="flex-row flex-wrap gap-2">
-                                {["Excellent", "Good", "Fair", "Poor"].map((q) => (
-                                    <TouchableOpacity
+                        </Card>
+
+                        <Card padding="md">
+                            <Text style={{ fontSize: typo.headline.fontSize, fontFamily: 'Inter-SemiBold', fontWeight: '600', color: colors.text.primary, marginBottom: spacing.base }}>
+                                Sleep Quality
+                            </Text>
+                            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
+                                {qualityOptions.map((q) => (
+                                    <Pressable
                                         key={q}
                                         onPress={() => setSleepQuality(q)}
-                                        className={`px-4 py-2 rounded-full border ${sleepQuality === q ? 'bg-indigo-100 border-indigo-500' : 'bg-white border-slate-200'}`}
+                                        style={{
+                                            paddingHorizontal: 16, paddingVertical: 10,
+                                            borderRadius: radii.full,
+                                            borderWidth: 1.5,
+                                            borderColor: sleepQuality === q ? colors.health.sleep : colors.separator,
+                                            backgroundColor: sleepQuality === q ? colors.health.sleep + '10' : colors.background.secondary,
+                                        }}
                                     >
-                                        <Text className={sleepQuality === q ? 'text-indigo-700 font-medium' : 'text-slate-600'}>{q}</Text>
-                                    </TouchableOpacity>
+                                        <Text style={{
+                                            fontSize: typo.footnote.fontSize,
+                                            fontFamily: sleepQuality === q ? 'Inter-SemiBold' : 'Inter-Regular',
+                                            fontWeight: sleepQuality === q ? '600' : '400',
+                                            color: sleepQuality === q ? colors.health.sleep : colors.text.secondary,
+                                        }}>
+                                            {q}
+                                        </Text>
+                                    </Pressable>
                                 ))}
                             </View>
-                        </View>
+                        </Card>
                     </View>
                 );
-            case 2: // Wellness
+
+            case 2:
                 return (
-                    <View className="space-y-6">
-                        <View>
-                            <Text className="text-sm font-medium text-slate-700 mb-2">How are you feeling?</Text>
-                            <View className="flex-row justify-between">
-                                {[
-                                    { val: 'happy', icon: Smile, color: 'text-green-500', bg: 'bg-green-100' },
-                                    { val: 'okay', icon: Terminal, color: 'text-yellow-500', bg: 'bg-yellow-100' }, // using Terminal as neutral
-                                    { val: 'sad', icon: Activity, color: 'text-red-500', bg: 'bg-red-100' } // using Activity as stressed
-                                ].map((item) => (
-                                    <TouchableOpacity
-                                        key={item.val}
-                                        onPress={() => setMood(item.val)}
-                                        className={`p-4 rounded-xl border-2 flex-1 mx-1 items-center ${mood === item.val ? `border-${item.color.split('-')[1]}-500 ${item.bg}` : 'border-slate-100 bg-white'}`}
+                    <View style={{ gap: spacing.lg }}>
+                        <Card padding="md">
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: spacing.base }}>
+                                <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: colors.health.mood + '15', alignItems: 'center', justifyContent: 'center' }}>
+                                    <Smile size={18} color={colors.health.mood} />
+                                </View>
+                                <Text style={{ fontSize: typo.headline.fontSize, fontFamily: 'Inter-SemiBold', fontWeight: '600', color: colors.text.primary }}>
+                                    How are you feeling?
+                                </Text>
+                            </View>
+                            <View style={{ flexDirection: 'row', gap: spacing.sm }}>
+                                {moodOptions.map((m) => (
+                                    <Pressable
+                                        key={m.value}
+                                        onPress={() => setMood(m.value)}
+                                        style={{
+                                            flex: 1, paddingVertical: 14,
+                                            borderRadius: radii.sm,
+                                            borderWidth: 2,
+                                            borderColor: mood === m.value ? m.color : colors.separator,
+                                            backgroundColor: mood === m.value ? m.color + '10' : colors.background.secondary,
+                                            alignItems: 'center',
+                                        }}
                                     >
-                                        <item.icon size={24} className={item.color} color={mood === item.val ? undefined : 'gray'} />
-                                        <Text className={`text-xs mt-1 capitalize ${mood === item.val ? 'font-bold' : 'text-slate-500'}`}>{item.val}</Text>
-                                    </TouchableOpacity>
+                                        <Text style={{
+                                            fontSize: typo.footnote.fontSize,
+                                            fontFamily: mood === m.value ? 'Inter-SemiBold' : 'Inter-Regular',
+                                            fontWeight: mood === m.value ? '600' : '400',
+                                            color: mood === m.value ? m.color : colors.text.secondary,
+                                        }}>
+                                            {m.label}
+                                        </Text>
+                                    </Pressable>
                                 ))}
                             </View>
-                        </View>
+                        </Card>
 
-                        <View>
-                            <View className="flex-row justify-between mb-2">
-                                <Text className="text-sm font-medium text-slate-700">Energy Level</Text>
-                                <Text className="text-sm font-bold text-brand-primary">{Math.round(energy)}/10</Text>
+                        <Card padding="md">
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 4 }}>
+                                <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: colors.health.energy + '15', alignItems: 'center', justifyContent: 'center' }}>
+                                    <Zap size={18} color={colors.health.energy} />
+                                </View>
+                                <Text style={{ flex: 1, fontSize: typo.headline.fontSize, fontFamily: 'Inter-SemiBold', fontWeight: '600', color: colors.text.primary }}>
+                                    Energy Level
+                                </Text>
+                                <Text style={{ fontSize: typo.headline.fontSize, fontFamily: 'Inter-Bold', fontWeight: '700', color: colors.health.energy }}>
+                                    {Math.round(energy)}/10
+                                </Text>
                             </View>
                             <Slider
                                 minimumValue={1}
@@ -181,74 +233,83 @@ export default function DataEntryScreen({ navigation }: any) {
                                 step={1}
                                 value={energy}
                                 onValueChange={setEnergy}
-                                minimumTrackTintColor="#f59e0b"
-                                maximumTrackTintColor="#cbd5e1"
-                                thumbTintColor="#f59e0b"
+                                minimumTrackTintColor={colors.health.energy}
+                                maximumTrackTintColor={colors.fill.tertiary}
+                                thumbTintColor={colors.health.energy}
+                                style={{ marginTop: 8 }}
                             />
-                        </View>
+                        </Card>
                     </View>
                 );
         }
     };
 
-    const CurrentIcon = sections[currentSection].icon;
-
     return (
-        <ScreenLayout gradientBackground>
-            <View className="flex-1">
+        <ScreenLayout>
+            <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 40 }} showsVerticalScrollIndicator={false} keyboardDismissMode="on-drag" keyboardShouldPersistTaps="handled">
                 {/* Header */}
-                <View className="p-4 pt-2">
-                    <TouchableOpacity onPress={() => navigation.goBack()} className="mb-4 flex-row items-center bg-white/20 px-3 py-2 rounded-full self-start">
-                        <ArrowLeft color="white" size={20} />
-                        <Text className="text-white font-bold ml-2">Back</Text>
-                    </TouchableOpacity>
-                    <Text className="text-white text-2xl font-bold">Daily Log</Text>
-                    <View className="flex-row items-center space-x-2 mt-1">
-                        <Calendar size={14} color="#ccfbf1" />
-                        <Text className="text-teal-100 text-sm">{new Date().toDateString()}</Text>
-                    </View>
-                </View>
-
-                {/* Progress Bar */}
-                <View className="px-6 mb-6 flex-row space-x-2">
-                    {sections.map((_, i) => (
-                        <View
-                            key={i}
-                            className={`h-1 flex-1 rounded-full ${i <= currentSection ? 'bg-teal-400' : 'bg-white/20'}`}
-                        />
-                    ))}
-                </View>
-
-                {/* Form Card */}
-                <View className="bg-white rounded-t-3xl flex-1 px-6 pt-8 pb-10 shadow-2xl">
-                    <View className="flex-row items-center space-x-4 mb-8">
-                        <View className={`p-3 rounded-2xl ${sections[currentSection].color}`}>
-                            <CurrentIcon color="white" size={24} />
-                        </View>
-                        <View>
-                            <Text className="text-xl font-bold text-slate-900">{sections[currentSection].title}</Text>
-                            <Text className="text-slate-500">Step {currentSection + 1} of 3</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: spacing.base, paddingTop: spacing.sm, gap: 12 }}>
+                    <Pressable onPress={() => navigation.goBack()} hitSlop={10}>
+                        <ArrowLeft size={24} color={colors.brand.primary} />
+                    </Pressable>
+                    <View>
+                        <Text style={{ fontSize: typo.largeTitle.fontSize, lineHeight: typo.largeTitle.lineHeight, fontFamily: 'Inter-Bold', fontWeight: '700', color: colors.text.primary }}>
+                            Log Entry
+                        </Text>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 }}>
+                            <Calendar size={12} color={colors.text.secondary} />
+                            <Text style={{ fontSize: typo.caption1.fontSize, fontFamily: 'Inter-Regular', color: colors.text.secondary }}>
+                                {new Date().toDateString()}
+                            </Text>
                         </View>
                     </View>
-
-                    <ScrollView className="flex-1" showsVerticalScrollIndicator={false} keyboardDismissMode="on-drag" keyboardShouldPersistTaps="handled">
-                        {renderSectionContent()}
-                    </ScrollView>
-
-                    <View className="mt-4 pt-4 border-t border-slate-100">
-                        <Button
-                            label={saving ? "Saving..." : (currentSection === sections.length - 1 ? "Save Entry" : "Next Section")}
-                            onPress={handleNext}
-                            icon={currentSection === sections.length - 1 ? <Save color="white" size={20} /> : undefined}
-                        />
-                        {currentSection > 0 && (
-                            <TouchableOpacity onPress={() => setCurrentSection(currentSection - 1)} className="mt-4 items-center">
-                                <Text className="text-slate-500 font-medium">Previous Step</Text>
-                            </TouchableOpacity>
-                        )}
-                    </View>
                 </View>
-            </View>
+
+                {/* Segmented Control */}
+                <View style={{ paddingHorizontal: spacing.base, paddingTop: spacing.lg }}>
+                    <SegmentedControl
+                        segments={SEGMENTS}
+                        selectedIndex={currentSection}
+                        onSelect={setCurrentSection}
+                    />
+                </View>
+
+                {/* Form */}
+                <View style={{ paddingHorizontal: spacing.base, paddingTop: spacing.lg }}>
+                    {renderSection()}
+                </View>
+
+                {/* Actions */}
+                <View style={{ paddingHorizontal: spacing.base, paddingTop: spacing.xl }}>
+                    <Button
+                        label={saving ? "Saving..." : (currentSection === SEGMENTS.length - 1 ? "Save Entry" : "Next")}
+                        onPress={handleNext}
+                        isLoading={saving}
+                        fullWidth
+                        icon={currentSection === SEGMENTS.length - 1 ? <Save size={18} color="#FFFFFF" /> : undefined}
+                    />
+                    {currentSection > 0 && (
+                        <Pressable
+                            onPress={() => setCurrentSection(currentSection - 1)}
+                            style={{ alignItems: 'center', paddingTop: spacing.base }}
+                        >
+                            <Text style={{ fontSize: typo.subheadline.fontSize, fontFamily: 'Inter-Medium', color: colors.text.secondary }}>
+                                Previous
+                            </Text>
+                        </Pressable>
+                    )}
+                </View>
+            </ScrollView>
+
+            {saving && (
+                <View style={{
+                    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+                    backgroundColor: 'rgba(0,0,0,0.3)',
+                    alignItems: 'center', justifyContent: 'center',
+                }}>
+                    <ActivityIndicator size="large" color={colors.system.blue} />
+                </View>
+            )}
         </ScreenLayout>
     );
 }

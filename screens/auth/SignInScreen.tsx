@@ -1,13 +1,15 @@
 import React, { useState } from "react";
-import { View, Text, TouchableOpacity, Image, Alert, Keyboard, TouchableWithoutFeedback, Platform } from "react-native";
+import { View, Text, Pressable, Alert, Keyboard, TouchableWithoutFeedback, Platform } from "react-native";
 import { ScreenLayout } from "../../components/ScreenLayout";
 import { Input } from "../../components/ui/Input";
 import { Button } from "../../components/ui/Button";
 import { CircuitBoard } from "lucide-react-native";
 import { useAuth } from "../../contexts/AuthContext";
+import { useTheme } from "../../lib/design/useTheme";
 
 export default function SignInScreen({ navigation }: any) {
     const { login } = useAuth();
+    const { colors, typography: typo, spacing, radii } = useTheme();
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
     const [isLoading, setIsLoading] = useState(false);
@@ -17,17 +19,14 @@ export default function SignInScreen({ navigation }: any) {
             Alert.alert("Error", "Please enter both email and password.");
             return;
         }
-
         setIsLoading(true);
         try {
-            // Call AuthContext → backend → MongoDB
             const user = await login(email, password);
             if (!user) {
                 const msg = "Invalid email or password.";
                 if (Platform.OS === 'web') alert(msg);
                 else Alert.alert("Invalid Credentials", msg);
             }
-            // Auth gate in App.tsx auto-navigates to Main — no navigation.replace needed!
         } catch (error) {
             console.error(error);
             const msg = "Something went wrong. Please try again.";
@@ -39,82 +38,126 @@ export default function SignInScreen({ navigation }: any) {
     };
 
     const content = (
-        <View className="flex-1 justify-center p-6">
-            <View className="mb-10 items-center">
-                {/* Logo Area */}
-                <View className="h-24 w-24 items-center justify-center rounded-3xl bg-brand-primary shadow-xl shadow-brand-primary/30 mb-6">
-                    <CircuitBoard size={48} color="#ffffff" />
+        <View style={{ flex: 1, justifyContent: 'center', paddingHorizontal: spacing.xl }}>
+            {/* Logo */}
+            <View style={{ alignItems: 'center', marginBottom: 40 }}>
+                <View style={{
+                    width: 80,
+                    height: 80,
+                    borderRadius: radii.xl,
+                    backgroundColor: colors.brand.primary,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    marginBottom: spacing.base,
+                }}>
+                    <CircuitBoard size={40} color="#FFFFFF" />
                 </View>
-                <Text className="text-3xl font-bold text-slate-900 dark:text-white">HealthTwin AI</Text>
-                <Text className="mt-2 text-brand-primary font-medium">Your Digital Health Companion</Text>
+                <Text style={{
+                    fontSize: typo.largeTitle.fontSize,
+                    lineHeight: typo.largeTitle.lineHeight,
+                    fontFamily: 'Inter-Bold',
+                    fontWeight: '700',
+                    color: colors.text.primary,
+                }}>
+                    HealthTwin
+                </Text>
+                <Text style={{
+                    fontSize: typo.subheadline.fontSize,
+                    fontFamily: 'Inter-Regular',
+                    color: colors.text.secondary,
+                    marginTop: 4,
+                }}>
+                    Your Digital Health Companion
+                </Text>
             </View>
 
-            <View className="w-full bg-white/80 dark:bg-slate-800/80 p-6 rounded-3xl shadow-lg shadow-purple-100 dark:shadow-none border border-white dark:border-slate-700">
-                <View className="mb-6">
-                    <Text className="text-2xl font-bold text-center text-slate-800 dark:text-slate-100">Welcome Back</Text>
+            {/* Form */}
+            <View style={{ gap: spacing.base }}>
+                <Input
+                    placeholder="Email"
+                    value={email}
+                    onChangeText={setEmail}
+                    autoCapitalize="none"
+                    keyboardType="email-address"
+                />
+                <Input
+                    placeholder="Password"
+                    value={password}
+                    onChangeText={setPassword}
+                    secureTextEntry
+                />
+                <Pressable onPress={() => console.log("Forgot password")}>
+                    <Text style={{
+                        textAlign: 'right',
+                        fontSize: typo.footnote.fontSize,
+                        fontFamily: 'Inter-Medium',
+                        color: colors.brand.primary,
+                    }}>
+                        Forgot Password?
+                    </Text>
+                </Pressable>
+            </View>
+
+            {/* Actions */}
+            <View style={{ marginTop: spacing['2xl'], gap: spacing.base }}>
+                <Button
+                    label={isLoading ? "Signing in..." : "Sign In"}
+                    onPress={handleLogin}
+                    isLoading={isLoading}
+                    fullWidth
+                    size="lg"
+                />
+
+                {/* Divider */}
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                    <View style={{ flex: 1, height: 0.5, backgroundColor: colors.separator }} />
+                    <Text style={{
+                        fontSize: typo.caption1.fontSize,
+                        fontFamily: 'Inter-Medium',
+                        color: colors.text.tertiary,
+                    }}>
+                        OR
+                    </Text>
+                    <View style={{ flex: 1, height: 0.5, backgroundColor: colors.separator }} />
                 </View>
 
-                <View className="space-y-4">
-                    <Input
-                        placeholder="Email"
-                        value={email}
-                        onChangeText={setEmail}
-                        autoCapitalize="none"
-                        keyboardType="email-address"
-                        className="bg-purple-50/50 dark:bg-slate-900/50 border-purple-100 dark:border-slate-700 text-slate-800 dark:text-slate-100"
-                        placeholderTextColor="#94a3b8"
-                    />
-                    <Input
-                        placeholder="Password"
-                        value={password}
-                        onChangeText={setPassword}
-                        secureTextEntry
-                        className="bg-purple-50/50 dark:bg-slate-900/50 border-purple-100 dark:border-slate-700 text-slate-800 dark:text-slate-100"
-                        placeholderTextColor="#94a3b8"
-                    />
-                    <TouchableOpacity onPress={() => console.log("Forgot password")}>
-                        <Text className="text-right text-sm text-brand-primary font-medium">
-                            Forgot Password?
-                        </Text>
-                    </TouchableOpacity>
-                </View>
-
-                <View className="mt-8 space-y-4">
-                    <Button
-                        label={isLoading ? "Signing in..." : "Sign In"}
-                        onPress={handleLogin}
-                        disabled={isLoading}
-                        className="w-full bg-brand-primary shadow-lg shadow-brand-primary/25 rounded-xl h-14"
-                        labelClasses="text-lg font-semibold"
-                    />
-
-                    <View className="flex-row items-center space-x-2 my-2">
-                        <View className="h-px flex-1 bg-slate-200 dark:bg-slate-700" />
-                        <Text className="text-xs text-slate-400 font-medium">OR CONTINUE WITH</Text>
-                        <View className="h-px flex-1 bg-slate-200 dark:bg-slate-700" />
+                {/* Social */}
+                <View style={{ flexDirection: 'row', gap: spacing.sm }}>
+                    <View style={{ flex: 1 }}>
+                        <Button variant="outline" label="Google" fullWidth />
                     </View>
-
-                    <View className="flex-row space-x-3 w-full justify-center">
-                        <Button variant="outline" className="flex-1 border-slate-200 dark:border-slate-700" label="Google" labelClasses="text-slate-600 dark:text-slate-300" />
-                        <Button variant="outline" className="flex-1 border-slate-200 dark:border-slate-700" label="Apple" labelClasses="text-slate-600 dark:text-slate-300" />
+                    <View style={{ flex: 1 }}>
+                        <Button variant="outline" label="Apple" fullWidth />
                     </View>
                 </View>
             </View>
 
-            <View className="mt-8 flex-row justify-center space-x-1">
-                <Text className="text-slate-500 dark:text-slate-400">Don't have an account?</Text>
-                <TouchableOpacity onPress={() => navigation.navigate("SignUp")}>
-                    <Text className="font-bold text-brand-primary">Sign Up</Text>
-                </TouchableOpacity>
+            {/* Sign Up Link */}
+            <View style={{ flexDirection: 'row', justifyContent: 'center', marginTop: spacing['2xl'], gap: 4 }}>
+                <Text style={{
+                    fontSize: typo.subheadline.fontSize,
+                    fontFamily: 'Inter-Regular',
+                    color: colors.text.secondary,
+                }}>
+                    Don't have an account?
+                </Text>
+                <Pressable onPress={() => navigation.navigate("SignUp")}>
+                    <Text style={{
+                        fontSize: typo.subheadline.fontSize,
+                        fontFamily: 'Inter-SemiBold',
+                        fontWeight: '600',
+                        color: colors.brand.primary,
+                    }}>
+                        Sign Up
+                    </Text>
+                </Pressable>
             </View>
         </View>
     );
 
     return (
-        <ScreenLayout gradientBackground>
-            {Platform.OS === 'web' ? (
-                content
-            ) : (
+        <ScreenLayout>
+            {Platform.OS === 'web' ? content : (
                 <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
                     {content}
                 </TouchableWithoutFeedback>

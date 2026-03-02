@@ -74,6 +74,21 @@ export function AuthProvider({ children }: AuthProviderProps) {
                     setUser({ id, name, email, profileImage: profileImage || undefined });
                     setTokenState(storedToken);
                     console.log(`[Auth] Session restored: ${name}`);
+
+                    // Refresh user data from server (gets fresh profileImage, etc.)
+                    try {
+                        const meRes = await apiFetch<AuthUser>('/api/auth/me');
+                        if (meRes.success && meRes.data) {
+                            const fresh = meRes.data;
+                            setUser(fresh);
+                            await AsyncStorage.multiSet([
+                                ['USER_ID', fresh.id],
+                                ['USER_NAME', fresh.name],
+                                ['USER_EMAIL', fresh.email],
+                                ['USER_PROFILE_IMAGE', fresh.profileImage ?? ''],
+                            ]);
+                        }
+                    } catch { /* silent — cached data is good enough */ }
                 } else {
                     // Cached info missing, force re-login
                     await removeToken();

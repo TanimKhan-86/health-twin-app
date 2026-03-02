@@ -1,14 +1,16 @@
 import React, { useState } from "react";
-import { View, Text, TouchableOpacity, ScrollView, Image, Alert, Platform } from "react-native";
+import { View, Text, Pressable, ScrollView, Image, Alert, Platform } from "react-native";
 import { ScreenLayout } from "../../components/ScreenLayout";
 import { Input } from "../../components/ui/Input";
 import { Button } from "../../components/ui/Button";
-import { Heart, ArrowLeft, Check, Camera, Upload } from "lucide-react-native";
+import { Heart, Check, Camera } from "lucide-react-native";
 import * as ImagePicker from 'expo-image-picker';
 import { useAuth } from "../../contexts/AuthContext";
+import { useTheme } from "../../lib/design/useTheme";
 
 export default function SignUpScreen({ navigation }: any) {
     const { register } = useAuth();
+    const { colors, typography: typo, spacing, radii } = useTheme();
     const [step, setStep] = useState(1);
     const [isLoading, setIsLoading] = useState(false);
     const [formData, setFormData] = useState({
@@ -26,23 +28,27 @@ export default function SignUpScreen({ navigation }: any) {
     const handleNext = () => {
         if (step === 1) {
             if (!formData.firstName || !formData.email || !formData.password) {
-                Alert.alert("Missing Fields", "Please fill in all required fields.");
+                const msg = "Please fill in all required fields.";
+                if (Platform.OS === 'web') alert(msg);
+                else Alert.alert("Missing Fields", msg);
                 return;
             }
             if (formData.password.length < 8) {
-                Alert.alert("Password Too Short", "Password must be at least 8 characters long.");
+                const msg = "Password must be at least 8 characters.";
+                if (Platform.OS === 'web') alert(msg);
+                else Alert.alert("Password Too Short", msg);
                 return;
             }
             if (formData.password !== formData.confirmPassword) {
-                Alert.alert("Password Mismatch", "Passwords do not match.");
+                const msg = "Passwords do not match.";
+                if (Platform.OS === 'web') alert(msg);
+                else Alert.alert("Mismatch", msg);
                 return;
             }
         }
-
         if (step < 3) setStep(step + 1);
         else handleSignup();
     };
-
 
     const handleBack = () => {
         if (step > 1) setStep(step - 1);
@@ -51,49 +57,37 @@ export default function SignUpScreen({ navigation }: any) {
 
     const pickImage = async () => {
         const result = await ImagePicker.launchImageLibraryAsync({
-            mediaTypes: ['images'],  // ← new API (MediaTypeOptions deprecated)
+            mediaTypes: ['images'],
             allowsEditing: true,
             aspect: [1, 1],
             quality: 0.3,
             base64: true,
         });
-
         if (!result.canceled && result.assets[0]) {
             const asset = result.assets[0];
-            // Convert to a base64 data URI (storable in MongoDB)
             const dataUri = asset.base64
                 ? `data:image/jpeg;base64,${asset.base64}`
-                : asset.uri; // fallback on platforms that don't return base64
+                : asset.uri;
             setFormData({ ...formData, profileImage: dataUri });
         }
     };
-
 
     const handleSignup = async () => {
         setIsLoading(true);
         try {
             const fullName = `${formData.firstName} ${formData.lastName}`.trim();
-
-            // Build optional profile fields
             const profile = {
                 age: formData.age ? parseInt(formData.age) : undefined,
                 heightCm: formData.height ? parseFloat(formData.height) : undefined,
                 weightKg: formData.weight ? parseFloat(formData.weight) : undefined,
                 profileImage: formData.profileImage ?? undefined,
             };
-
-            // Call AuthContext → backend → MongoDB (saves ALL fields)
             const user = await register(fullName, formData.email, formData.password, profile);
-
             if (!user) {
                 const msg = "Failed to create account. Email might already be in use.";
                 if (Platform.OS === 'web') alert(msg);
                 else Alert.alert("Error", msg);
-                return;
             }
-
-            console.log(`✅ Registered in MongoDB: ${user.id} with full profile`);
-            // Auth gate in App.tsx auto-navigates to Main
         } catch (error) {
             console.error(error);
             const msg = "Something went wrong. Please try again.";
@@ -104,25 +98,26 @@ export default function SignUpScreen({ navigation }: any) {
         }
     };
 
-
-    // Helper to render the circular steps
-    const renderStep = (num: number) => {
+    const renderStepIndicator = (num: number) => {
         const isActive = step === num;
         const isCompleted = step > num;
-
         return (
-            <View className="items-center justify-center">
-                <View
-                    className={`h-8 w-8 rounded-full items-center justify-center border ${isActive ? "border-brand-primary bg-purple-50" :
-                        isCompleted ? "bg-brand-primary border-brand-primary" : "border-slate-300 bg-white"
-                        }`}
-                >
+            <View style={{ alignItems: 'center' }}>
+                <View style={{
+                    width: 32, height: 32, borderRadius: 16,
+                    alignItems: 'center', justifyContent: 'center',
+                    backgroundColor: isCompleted ? colors.system.blue : isActive ? colors.system.blue + '15' : colors.fill.secondary,
+                    borderWidth: isActive ? 2 : 0,
+                    borderColor: colors.system.blue,
+                }}>
                     {isCompleted ? (
-                        <Check size={16} color="white" />
+                        <Check size={16} color="#FFFFFF" />
                     ) : (
-                        <Text className={`font-medium ${isActive ? "text-brand-primary" : "text-slate-400"}`}>
-                            {num}
-                        </Text>
+                        <Text style={{
+                            fontSize: typo.footnote.fontSize,
+                            fontFamily: 'Inter-SemiBold', fontWeight: '600',
+                            color: isActive ? colors.system.blue : colors.text.tertiary,
+                        }}>{num}</Text>
                     )}
                 </View>
             </View>
@@ -130,177 +125,197 @@ export default function SignUpScreen({ navigation }: any) {
     };
 
     return (
-        <ScreenLayout gradientBackground className="px-6 pt-12">
-
-            {/* Header Area */}
-            <View className="items-center mb-6">
-                <View className="h-16 w-16 items-center justify-center rounded-2xl bg-brand-primary/10 mb-4">
-                    <Heart size={32} color="#8b5cf6" fill="#8b5cf6" />
+        <ScreenLayout>
+            <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 40 }} showsVerticalScrollIndicator={false} keyboardDismissMode="on-drag" keyboardShouldPersistTaps="handled">
+                {/* Logo */}
+                <View style={{ alignItems: 'center', paddingTop: spacing.xl }}>
+                    <View style={{
+                        width: 56, height: 56, borderRadius: radii.lg,
+                        backgroundColor: colors.system.blue + '10',
+                        alignItems: 'center', justifyContent: 'center', marginBottom: spacing.base,
+                    }}>
+                        <Heart size={28} color={colors.system.blue} fill={colors.system.blue} />
+                    </View>
+                    <Text style={{ fontSize: typo.largeTitle.fontSize, fontFamily: 'Inter-Bold', fontWeight: '700', color: colors.text.primary, marginBottom: 4 }}>
+                        Create Account
+                    </Text>
+                    <Text style={{ fontSize: typo.subheadline.fontSize, fontFamily: 'Inter-Regular', color: colors.text.secondary }}>
+                        Set up your health profile
+                    </Text>
                 </View>
-                <Text className="text-xl font-bold text-brand-primary mb-1">HealthTwin AI</Text>
-                <Text className="text-sm text-brand-secondary mb-6">Your Digital Health Companion</Text>
 
-                <Text className="text-3xl font-bold text-slate-900 text-center">Create a Profile</Text>
-                <Text className="text-slate-500 text-center mt-2 px-8">
-                    Create a demo profile to store your avatar and health data.
-                </Text>
-            </View>
+                {/* Step Indicator */}
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingHorizontal: spacing.xl, paddingTop: spacing.lg }}>
+                    {renderStepIndicator(1)}
+                    <View style={{ flex: 1, height: 1, backgroundColor: step > 1 ? colors.system.blue : colors.separator, marginHorizontal: spacing.sm }} />
+                    {renderStepIndicator(2)}
+                    <View style={{ flex: 1, height: 1, backgroundColor: step > 2 ? colors.system.blue : colors.separator, marginHorizontal: spacing.sm }} />
+                    {renderStepIndicator(3)}
+                </View>
 
-            {/* Stepper */}
-            <View className="flex-row items-center justify-center mb-8 px-4">
-                {renderStep(1)}
-                <View className={`flex-1 h-px mx-2 ${step > 1 ? "bg-brand-primary" : "bg-slate-200"}`} />
-                {renderStep(2)}
-                <View className={`flex-1 h-px mx-2 ${step > 2 ? "bg-brand-primary" : "bg-slate-200"}`} />
-                {renderStep(3)}
-            </View>
+                {/* Step Labels */}
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: spacing.lg, marginTop: 8, marginBottom: spacing.lg }}>
+                    <Text style={{ fontSize: typo.caption2.fontSize, fontFamily: 'Inter-Regular', color: step >= 1 ? colors.system.blue : colors.text.tertiary }}>Account</Text>
+                    <Text style={{ fontSize: typo.caption2.fontSize, fontFamily: 'Inter-Regular', color: step >= 2 ? colors.system.blue : colors.text.tertiary }}>Profile</Text>
+                    <Text style={{ fontSize: typo.caption2.fontSize, fontFamily: 'Inter-Regular', color: step >= 3 ? colors.system.blue : colors.text.tertiary }}>Photo</Text>
+                </View>
 
-            {/* Form Content */}
-            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 40 }} keyboardDismissMode="on-drag" keyboardShouldPersistTaps="handled">
-                {step === 1 && (
-                    <View className="space-y-4">
-                        <View className="flex-row space-x-4">
-                            <Input
-                                containerClassName="flex-1"
-                                placeholder="First Name"
-                                value={formData.firstName}
-                                onChangeText={(t) => setFormData({ ...formData, firstName: t })}
-                                className="bg-purple-50/50 border-purple-100/80 rounded-2xl h-14"
-                                placeholderTextColor="#94a3b8"
-                            />
-                            <Input
-                                containerClassName="flex-1"
-                                placeholder="Last Name"
-                                value={formData.lastName}
-                                onChangeText={(t) => setFormData({ ...formData, lastName: t })}
-                                className="bg-purple-50/50 border-purple-100/80 rounded-2xl h-14"
-                                placeholderTextColor="#94a3b8"
-                            />
-                        </View>
-
-                        <Input
-                            placeholder="Email Address"
-                            value={formData.email}
-                            onChangeText={(t) => setFormData({ ...formData, email: t })}
-                            keyboardType="email-address"
-                            className="bg-purple-50/50 border-purple-100/80 rounded-2xl h-14"
-                            placeholderTextColor="#94a3b8"
-                        />
-
-                        <Input
-                            placeholder="Password"
-                            value={formData.password}
-                            onChangeText={(t) => setFormData({ ...formData, password: t })}
-                            secureTextEntry
-                            className="bg-purple-50/50 border-purple-100/80 rounded-2xl h-14"
-                            placeholderTextColor="#94a3b8"
-                        />
-
-                        <Input
-                            placeholder="Confirm Password"
-                            value={formData.confirmPassword}
-                            onChangeText={(t) => setFormData({ ...formData, confirmPassword: t })}
-                            secureTextEntry
-                            className="bg-purple-50/50 border-purple-100/80 rounded-2xl h-14"
-                            placeholderTextColor="#94a3b8"
-                        />
-                    </View>
-                )}
-
-                {step === 2 && (
-                    <View className="space-y-4">
-                        <Text className="text-center text-slate-600 mb-2">Tell us about yourself for the simulation</Text>
-                        <Input
-                            placeholder="Age"
-                            value={formData.age}
-                            onChangeText={(t) => setFormData({ ...formData, age: t })}
-                            keyboardType="numeric"
-                            className="bg-purple-50/50 border-purple-100/80 rounded-2xl h-14"
-                            placeholderTextColor="#94a3b8"
-                        />
-                        <View className="flex-row space-x-4">
-                            <Input
-                                containerClassName="flex-1"
-                                placeholder="Height (cm)"
-                                value={formData.height}
-                                onChangeText={(t) => setFormData({ ...formData, height: t })}
-                                keyboardType="numeric"
-                                className="bg-purple-50/50 border-purple-100/80 rounded-2xl h-14"
-                                placeholderTextColor="#94a3b8"
-                            />
-                            <Input
-                                containerClassName="flex-1"
-                                placeholder="Weight (kg)"
-                                value={formData.weight}
-                                onChangeText={(t) => setFormData({ ...formData, weight: t })}
-                                keyboardType="numeric"
-                                className="bg-purple-50/50 border-purple-100/80 rounded-2xl h-14"
-                                placeholderTextColor="#94a3b8"
-                            />
-                        </View>
-                    </View>
-                )}
-
-                {step === 3 && (
-                    <View className="space-y-6 items-center py-4">
-                        <Text className="text-xl font-bold text-slate-800">Profile Picture</Text>
-                        <Text className="text-center text-slate-500 px-4">
-                            Upload a photo to personalize your dashboard and digital twin.
-                        </Text>
-
-                        <TouchableOpacity
-                            onPress={pickImage}
-                            className="h-40 w-40 rounded-full bg-purple-50 border-2 border-dashed border-purple-200 items-center justify-center overflow-hidden"
-                        >
-                            {formData.profileImage ? (
-                                <Image
-                                    source={{ uri: formData.profileImage }}
-                                    className="h-full w-full"
-                                    resizeMode="cover"
-                                />
-                            ) : (
-                                <View className="items-center space-y-2">
-                                    <Camera size={32} color="#a855f7" />
-                                    <Text className="text-xs text-brand-primary font-medium">Tap to Upload</Text>
+                {/* Form */}
+                <View style={{ paddingHorizontal: spacing.base }}>
+                    {step === 1 && (
+                        <View style={{ gap: spacing.base }}>
+                            <View style={{ flexDirection: 'row', gap: spacing.sm }}>
+                                <View style={{ flex: 1 }}>
+                                    <Input
+                                        label="First Name"
+                                        placeholder="John"
+                                        value={formData.firstName}
+                                        onChangeText={(t) => setFormData({ ...formData, firstName: t })}
+                                    />
                                 </View>
+                                <View style={{ flex: 1 }}>
+                                    <Input
+                                        label="Last Name"
+                                        placeholder="Doe"
+                                        value={formData.lastName}
+                                        onChangeText={(t) => setFormData({ ...formData, lastName: t })}
+                                    />
+                                </View>
+                            </View>
+                            <Input
+                                label="Email"
+                                placeholder="john@example.com"
+                                value={formData.email}
+                                onChangeText={(t) => setFormData({ ...formData, email: t })}
+                                keyboardType="email-address"
+                                autoCapitalize="none"
+                            />
+                            <Input
+                                label="Password"
+                                placeholder="Min. 8 characters"
+                                value={formData.password}
+                                onChangeText={(t) => setFormData({ ...formData, password: t })}
+                                secureTextEntry
+                            />
+                            <Input
+                                label="Confirm Password"
+                                placeholder="Re-enter password"
+                                value={formData.confirmPassword}
+                                onChangeText={(t) => setFormData({ ...formData, confirmPassword: t })}
+                                secureTextEntry
+                            />
+                        </View>
+                    )}
+
+                    {step === 2 && (
+                        <View style={{ gap: spacing.base }}>
+                            <Text style={{ fontSize: typo.subheadline.fontSize, fontFamily: 'Inter-Regular', color: colors.text.secondary, textAlign: 'center', marginBottom: spacing.sm }}>
+                                Optional — helps personalize your experience
+                            </Text>
+                            <Input
+                                label="Age"
+                                placeholder="e.g. 28"
+                                value={formData.age}
+                                onChangeText={(t) => setFormData({ ...formData, age: t })}
+                                keyboardType="numeric"
+                            />
+                            <View style={{ flexDirection: 'row', gap: spacing.sm }}>
+                                <View style={{ flex: 1 }}>
+                                    <Input
+                                        label="Height (cm)"
+                                        placeholder="e.g. 175"
+                                        value={formData.height}
+                                        onChangeText={(t) => setFormData({ ...formData, height: t })}
+                                        keyboardType="numeric"
+                                    />
+                                </View>
+                                <View style={{ flex: 1 }}>
+                                    <Input
+                                        label="Weight (kg)"
+                                        placeholder="e.g. 70"
+                                        value={formData.weight}
+                                        onChangeText={(t) => setFormData({ ...formData, weight: t })}
+                                        keyboardType="numeric"
+                                    />
+                                </View>
+                            </View>
+                        </View>
+                    )}
+
+                    {step === 3 && (
+                        <View style={{ alignItems: 'center', gap: spacing.lg, paddingTop: spacing.base }}>
+                            <Text style={{ fontSize: typo.headline.fontSize, fontFamily: 'Inter-SemiBold', color: colors.text.primary }}>
+                                Profile Photo
+                            </Text>
+                            <Text style={{ fontSize: typo.subheadline.fontSize, fontFamily: 'Inter-Regular', color: colors.text.secondary, textAlign: 'center' }}>
+                                Add a photo to personalize your profile
+                            </Text>
+                            <Pressable
+                                onPress={pickImage}
+                                style={{
+                                    width: 140, height: 140, borderRadius: 70,
+                                    backgroundColor: colors.fill.secondary,
+                                    borderWidth: 2, borderStyle: 'dashed',
+                                    borderColor: colors.separator,
+                                    alignItems: 'center', justifyContent: 'center',
+                                    overflow: 'hidden',
+                                }}
+                            >
+                                {formData.profileImage ? (
+                                    <Image
+                                        source={{ uri: formData.profileImage }}
+                                        style={{ width: '100%', height: '100%' }}
+                                        resizeMode="cover"
+                                    />
+                                ) : (
+                                    <View style={{ alignItems: 'center', gap: 8 }}>
+                                        <Camera size={28} color={colors.text.tertiary} />
+                                        <Text style={{ fontSize: typo.caption1.fontSize, fontFamily: 'Inter-Medium', color: colors.text.tertiary }}>
+                                            Tap to upload
+                                        </Text>
+                                    </View>
+                                )}
+                            </Pressable>
+                            {formData.profileImage && (
+                                <Pressable onPress={() => setFormData({ ...formData, profileImage: null })}>
+                                    <Text style={{ fontSize: typo.footnote.fontSize, fontFamily: 'Inter-Regular', color: colors.system.red }}>
+                                        Remove Photo
+                                    </Text>
+                                </Pressable>
                             )}
-                        </TouchableOpacity>
+                        </View>
+                    )}
+                </View>
 
-                        {formData.profileImage && (
-                            <TouchableOpacity onPress={() => setFormData({ ...formData, profileImage: null })}>
-                                <Text className="text-red-500 text-sm">Remove Photo</Text>
-                            </TouchableOpacity>
-                        )}
-                    </View>
-                )}
+                {/* Actions */}
+                <View style={{ paddingHorizontal: spacing.base, paddingTop: spacing.xl }}>
+                    <Button
+                        label={isLoading ? "Creating Account..." : (step === 3 ? "Create Account" : "Continue")}
+                        onPress={handleNext}
+                        isLoading={isLoading}
+                        fullWidth
+                    />
+
+                    {step > 1 ? (
+                        <Pressable onPress={handleBack} style={{ alignItems: 'center', paddingTop: spacing.base }} disabled={isLoading}>
+                            <Text style={{ fontSize: typo.subheadline.fontSize, fontFamily: 'Inter-Medium', color: colors.text.secondary }}>
+                                Back
+                            </Text>
+                        </Pressable>
+                    ) : (
+                        <View style={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'center', paddingTop: spacing.lg, gap: 4 }}>
+                            <Text style={{ fontSize: typo.subheadline.fontSize, fontFamily: 'Inter-Regular', color: colors.text.secondary }}>
+                                Already have an account?
+                            </Text>
+                            <Pressable onPress={() => navigation.navigate("SignIn")}>
+                                <Text style={{ fontSize: typo.subheadline.fontSize, fontFamily: 'Inter-SemiBold', fontWeight: '600', color: colors.system.blue }}>
+                                    Sign In
+                                </Text>
+                            </Pressable>
+                        </View>
+                    )}
+                </View>
             </ScrollView>
-
-            {/* Bottom Actions */}
-            <View className="pb-10 pt-4">
-                <Button
-                    label={isLoading ? "Creating Profile..." : (step === 3 ? "Complete Sign Up" : "Continue")}
-                    onPress={handleNext}
-                    disabled={isLoading}
-                    className="w-full bg-brand-primary h-14 rounded-full shadow-lg shadow-brand-primary/30"
-                    labelClasses="text-lg font-semibold"
-                />
-
-                {step === 1 && (
-                    <View className="mt-6 flex-row justify-center space-x-1">
-                        <Text className="text-slate-500">Already have a profile?</Text>
-                        <TouchableOpacity onPress={() => navigation.navigate("SignIn")}>
-                            <Text className="font-bold text-brand-secondary">Sign In</Text>
-                        </TouchableOpacity>
-                    </View>
-                )}
-
-                {step > 1 && (
-                    <TouchableOpacity onPress={handleBack} className="mt-4 items-center" disabled={isLoading}>
-                        <Text className="text-slate-400 font-medium">Back</Text>
-                    </TouchableOpacity>
-                )}
-            </View>
-
         </ScreenLayout>
     );
 }

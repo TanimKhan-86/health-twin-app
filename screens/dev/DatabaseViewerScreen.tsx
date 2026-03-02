@@ -1,59 +1,105 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, ScrollView } from 'react-native';
+import { View, Text, ScrollView, Pressable } from 'react-native';
 import { ScreenLayout } from '../../components/ScreenLayout';
-import { ArrowLeft, Database } from 'lucide-react-native';
-import { Card, CardContent } from '../../components/ui/Card';
+import { Card } from '../../components/ui/Card';
+import { SectionHeader } from '../../components/ui/SectionHeader';
+import { MetricRow } from '../../components/ui/MetricRow';
+import { ArrowLeft, Database, Server, Shield, HardDrive } from 'lucide-react-native';
+import { useTheme } from '../../lib/design/useTheme';
 
-/**
- * DatabaseViewerScreen — previously showed SQLite data.
- * SQLite has been removed. All data is now in MongoDB Atlas.
- * This screen now shows a notice and could be extended to show
- * the user's MongoDB data via the API.
- */
+const COLLECTIONS = ['users', 'healthentries', 'moodentries', 'streaks'];
+
 export default function DatabaseViewerScreen({ navigation }: any) {
+    const { colors, typography: typo, spacing, radii } = useTheme();
+
     return (
-        <ScreenLayout gradientBackground>
-            <View className="flex-1">
-                <View className="p-4 pt-2 flex-row items-center space-x-4">
-                    <TouchableOpacity
-                        onPress={() => navigation.goBack()}
-                        className="flex-row items-center bg-white/20 px-3 py-2 rounded-full"
-                    >
-                        <ArrowLeft color="white" size={20} />
-                        <Text className="text-white font-bold ml-2">Back</Text>
-                    </TouchableOpacity>
-                    <View>
-                        <Text className="text-white text-xl font-bold">Database</Text>
-                        <Text className="text-teal-200 text-xs">Storage info</Text>
-                    </View>
+        <ScreenLayout>
+            <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+                {/* Header */}
+                <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: spacing.base, paddingTop: spacing.sm, gap: 12 }}>
+                    <Pressable onPress={() => navigation.goBack()} hitSlop={10}>
+                        <ArrowLeft size={24} color={colors.brand.primary} />
+                    </Pressable>
+                    <Text style={{ fontSize: typo.largeTitle.fontSize, lineHeight: typo.largeTitle.lineHeight, fontFamily: 'Inter-Bold', fontWeight: '700', color: colors.text.primary }}>
+                        Database
+                    </Text>
                 </View>
 
-                <ScrollView contentContainerStyle={{ padding: 16 }}>
-                    <Card className="bg-white/95">
-                        <CardContent className="p-8 items-center">
-                            <Database size={48} color="#a855f7" />
-                            <Text className="text-slate-800 font-bold text-xl mt-4 text-center">
-                                MongoDB Atlas ☁️
+                {/* Status Card */}
+                <View style={{ paddingHorizontal: spacing.base, paddingTop: spacing.lg }}>
+                    <Card padding="lg" style={{ alignItems: 'center', gap: 12 }}>
+                        <View style={{ width: 56, height: 56, borderRadius: 28, backgroundColor: colors.system.green + '15', alignItems: 'center', justifyContent: 'center' }}>
+                            <Database size={28} color={colors.system.green} />
+                        </View>
+                        <Text style={{ fontSize: typo.title2.fontSize, fontFamily: 'Inter-Bold', fontWeight: '700', color: colors.text.primary }}>
+                            MongoDB Atlas
+                        </Text>
+                        <View style={{ paddingHorizontal: 12, paddingVertical: 4, borderRadius: radii.full, backgroundColor: colors.system.green + '15' }}>
+                            <Text style={{ fontSize: typo.caption1.fontSize, fontFamily: 'Inter-SemiBold', fontWeight: '600', color: colors.system.green }}>
+                                Connected
                             </Text>
-                            <Text className="text-slate-500 text-sm text-center mt-3 leading-6">
-                                All your data is stored securely in MongoDB Atlas.
-                                There is no local database on this device.
-                            </Text>
-                            <View className="bg-purple-50 rounded-xl p-4 mt-6 w-full">
-                                <Text className="text-purple-800 font-bold mb-2">Collections:</Text>
-                                {['users', 'healthentries', 'moodentries', 'streaks'].map(col => (
-                                    <Text key={col} className="text-purple-600 text-sm py-1">
-                                        📦 {col}
-                                    </Text>
-                                ))}
-                            </View>
-                            <Text className="text-slate-400 text-xs mt-4 text-center">
-                                Use the Analytics screen to view your stored health data.
-                            </Text>
-                        </CardContent>
+                        </View>
+                        <Text style={{ fontSize: typo.subheadline.fontSize, fontFamily: 'Inter-Regular', color: colors.text.secondary, textAlign: 'center', lineHeight: 22 }}>
+                            All data is stored securely in the cloud. No local database on this device.
+                        </Text>
                     </Card>
-                </ScrollView>
-            </View>
+                </View>
+
+                {/* Info */}
+                <SectionHeader title="Details" />
+                <View style={{ paddingHorizontal: spacing.base }}>
+                    <Card padding="none">
+                        <MetricRow
+                            icon={<Server size={16} color={colors.system.blue} />}
+                            iconColor={colors.system.blue}
+                            label="Provider"
+                            value="MongoDB Atlas"
+                        />
+                        <MetricRow
+                            icon={<Shield size={16} color={colors.system.green} />}
+                            iconColor={colors.system.green}
+                            label="Encryption"
+                            value="TLS/SSL"
+                        />
+                        <MetricRow
+                            icon={<HardDrive size={16} color={colors.system.purple} />}
+                            iconColor={colors.system.purple}
+                            label="Local Storage"
+                            value="None"
+                            showSeparator={false}
+                        />
+                    </Card>
+                </View>
+
+                {/* Collections */}
+                <SectionHeader title="Collections" />
+                <View style={{ paddingHorizontal: spacing.base }}>
+                    <Card padding="md">
+                        {COLLECTIONS.map((col, i) => (
+                            <View key={col} style={{
+                                flexDirection: 'row', alignItems: 'center', gap: 10,
+                                paddingVertical: 10,
+                                borderBottomWidth: i < COLLECTIONS.length - 1 ? 0.5 : 0,
+                                borderBottomColor: colors.separator,
+                            }}>
+                                <View style={{ width: 28, height: 28, borderRadius: 6, backgroundColor: colors.system.indigo + '15', alignItems: 'center', justifyContent: 'center' }}>
+                                    <Database size={14} color={colors.system.indigo} />
+                                </View>
+                                <Text style={{ fontSize: typo.body.fontSize, fontFamily: 'Inter-Regular', color: colors.text.primary }}>
+                                    {col}
+                                </Text>
+                            </View>
+                        ))}
+                    </Card>
+                </View>
+
+                {/* Footer note */}
+                <View style={{ paddingHorizontal: spacing.base, paddingTop: spacing.lg }}>
+                    <Text style={{ fontSize: typo.caption1.fontSize, fontFamily: 'Inter-Regular', color: colors.text.tertiary, textAlign: 'center' }}>
+                        Use the Insights tab to view your stored health data.
+                    </Text>
+                </View>
+            </ScrollView>
         </ScreenLayout>
     );
 }

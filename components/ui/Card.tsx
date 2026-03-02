@@ -1,51 +1,38 @@
-import { View, ViewProps, Text } from "react-native";
-import { cn } from "../../lib/utils";
+import React from "react";
+import { View, ViewProps } from "react-native";
+import { useTheme } from "../../lib/design/useTheme";
 
-export function Card({ className, ...props }: ViewProps) {
+interface CardProps extends Omit<ViewProps, 'style'> {
+    padding?: 'none' | 'sm' | 'md' | 'lg';
+    style?: ViewProps['style'];
+}
+
+export function Card({ padding = 'md', style, children, ...props }: CardProps) {
+    const { colors, radii, shadows } = useTheme();
+
+    const getPadding = () => {
+        switch (padding) {
+            case 'none': return 0;
+            case 'sm': return 12;
+            case 'md': return 16;
+            case 'lg': return 20;
+        }
+    };
+
     return (
         <View
-            className={cn(
-                "rounded-2xl border border-slate-200 bg-white shadow-sm",
-                "dark:bg-slate-800 dark:border-slate-700",
-                className
-            )}
+            style={[
+                {
+                    backgroundColor: colors.background.secondary,
+                    borderRadius: radii.md,
+                    padding: getPadding(),
+                },
+                shadows.sm,
+                style,
+            ]}
             {...props}
-        />
+        >
+            {children}
+        </View>
     );
 }
-
-export function CardHeader({ className, ...props }: ViewProps) {
-    return (
-        <View className={cn("flex flex-col space-y-1.5 p-6", className)} {...props} />
-    );
-}
-
-export function CardTitle({ className, ...props }: TextProps & { children: React.ReactNode }) {
-    // We need to cast props because TextProps doesn't have children in some definitions
-    // but it works in RN.
-    return (
-        <Text
-            className={cn(
-                "text-2xl font-semibold leading-none tracking-tight text-slate-900 dark:text-slate-100",
-                className
-            )}
-            {...props as any}
-        />
-    );
-}
-
-export function CardContent({ className, ...props }: ViewProps) {
-    return <View className={cn("p-6 pt-0", className)} {...props} />;
-}
-
-export function CardFooter({ className, ...props }: ViewProps) {
-    return (
-        <View
-            className={cn("flex flex-row items-center p-6 pt-0", className)}
-            {...props}
-        />
-    );
-}
-
-// Helper to make TextProps available
-import { TextProps } from "react-native";

@@ -1,90 +1,122 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, ScrollView, Image, TouchableOpacity } from 'react-native';
+import { View, Text, ScrollView, Pressable } from 'react-native';
 import { ScreenLayout } from '../../components/ScreenLayout';
-import { Card, CardContent } from '../../components/ui/Card';
+import { Card } from '../../components/ui/Card';
+import { SectionHeader } from '../../components/ui/SectionHeader';
+import { Skeleton } from '../../components/ui/Skeleton';
 import { ArrowLeft, Lock, Trophy } from 'lucide-react-native';
 import { GamificationService } from '../../lib/gamification';
 import { useAuth } from '../../contexts/AuthContext';
+import { useTheme } from '../../lib/design/useTheme';
 
 export default function AchievementsScreen({ navigation }: any) {
     const { user } = useAuth();
+    const { colors, typography: typo, spacing, radii } = useTheme();
     const [badges, setBadges] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
 
-    useEffect(() => {
-        loadBadges();
-    }, [user]);
+    useEffect(() => { loadBadges(); }, [user]);
 
     const loadBadges = async () => {
         try {
             const userId = user?.id ?? 'demo-user';
-            // Force check achievements first to ensure latest state
             await GamificationService.checkAchievements(userId);
             const data = await GamificationService.getBadgeProgress(userId);
             setBadges(data);
-        } catch (e) {
-            console.error(e);
-        } finally {
-            setLoading(false);
-        }
+        } catch (e) { console.error(e); }
+        finally { setLoading(false); }
     };
 
+    const unlocked = badges.filter(b => b.isUnlocked).length;
+
     return (
-        <ScreenLayout gradientBackground>
-            <View className="flex-1">
+        <ScreenLayout>
+            <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
                 {/* Header */}
-                <View className="p-4 pt-2 flex-row items-center space-x-4">
-                    <TouchableOpacity onPress={() => navigation.goBack()} className="flex-row items-center bg-white/20 px-3 py-2 rounded-full">
-                        <ArrowLeft color="white" size={20} />
-                        <Text className="text-white font-bold ml-2">Back</Text>
-                    </TouchableOpacity>
-                    <View>
-                        <Text className="text-white text-xl font-bold">Achievements</Text>
-                        <Text className="text-teal-200 text-xs">Your health milestones</Text>
-                    </View>
+                <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: spacing.base, paddingTop: spacing.sm, gap: 12 }}>
+                    <Pressable onPress={() => navigation.goBack()} hitSlop={10}>
+                        <ArrowLeft size={24} color={colors.brand.primary} />
+                    </Pressable>
+                    <Text style={{ fontSize: typo.largeTitle.fontSize, lineHeight: typo.largeTitle.lineHeight, fontFamily: 'Inter-Bold', fontWeight: '700', color: colors.text.primary }}>
+                        Achievements
+                    </Text>
                 </View>
 
-                <ScrollView contentContainerStyle={{ padding: 16 }}>
-                    {/* Stats Summary */}
-                    <Card className="mb-6 bg-white/10 backdrop-blur-md border-white/20">
-                        <CardContent className="flex-row justify-around py-4">
-                            <View className="items-center">
-                                <Text className="text-3xl font-bold text-white">{badges.filter(b => b.isUnlocked).length}</Text>
-                                <Text className="text-teal-100 text-xs">Unlocked</Text>
-                            </View>
-                            <View className="items-center">
-                                <Text className="text-3xl font-bold text-white">{badges.length}</Text>
-                                <Text className="text-teal-100 text-xs">Total Available</Text>
-                            </View>
-                        </CardContent>
+                {/* Stats */}
+                <View style={{ flexDirection: 'row', paddingHorizontal: spacing.base, paddingTop: spacing.base, gap: spacing.sm }}>
+                    <Card padding="md" style={{ flex: 1, alignItems: 'center' }}>
+                        <Trophy size={24} color={colors.system.orange} />
+                        <Text style={{ fontSize: typo.title1.fontSize, fontFamily: 'Inter-Bold', fontWeight: '700', color: colors.text.primary, marginTop: 4 }}>
+                            {unlocked}
+                        </Text>
+                        <Text style={{ fontSize: typo.caption1.fontSize, fontFamily: 'Inter-Regular', color: colors.text.secondary }}>Unlocked</Text>
                     </Card>
+                    <Card padding="md" style={{ flex: 1, alignItems: 'center' }}>
+                        <Lock size={24} color={colors.gray[1]} />
+                        <Text style={{ fontSize: typo.title1.fontSize, fontFamily: 'Inter-Bold', fontWeight: '700', color: colors.text.primary, marginTop: 4 }}>
+                            {badges.length}
+                        </Text>
+                        <Text style={{ fontSize: typo.caption1.fontSize, fontFamily: 'Inter-Regular', color: colors.text.secondary }}>Total</Text>
+                    </Card>
+                </View>
 
-                    {/* Badges Grid */}
-                    <View className="flex-row flex-wrap justify-between">
+                {/* Badges */}
+                <SectionHeader title="Badges" />
+
+                {loading ? (
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: spacing.base, gap: spacing.sm }}>
+                        {[1, 2, 3, 4, 5, 6].map(i => (
+                            <Skeleton key={i} width="48%" height={140} borderRadius={radii.md} style={{ marginBottom: 0 }} />
+                        ))}
+                    </View>
+                ) : (
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: spacing.base, gap: spacing.sm }}>
                         {badges.map((badge) => (
-                            <View key={badge.id} className="w-[48%] mb-4">
-                                <Card className={`h-40 ${badge.isUnlocked ? 'bg-white/95' : 'bg-white/50 border-white/10'}`}>
-                                    <CardContent className="h-full items-center justify-center p-3 text-center">
-                                        <View className={`w-14 h-14 rounded-full items-center justify-center mb-2 ${badge.isUnlocked ? 'bg-amber-100' : 'bg-slate-200'}`}>
-                                            {badge.isUnlocked ? (
-                                                <Text className="text-2xl">{badge.icon}</Text>
-                                            ) : (
-                                                <Lock size={20} color="#94a3b8" />
-                                            )}
-                                        </View>
-                                        <Text className={`font-bold text-sm mb-1 ${badge.isUnlocked ? 'text-slate-800' : 'text-slate-500'}`}>
-                                            {badge.name}
-                                        </Text>
-                                        <Text className="text-xs text-slate-400 text-center" numberOfLines={2}>
-                                            {badge.description}
-                                        </Text>
-                                    </CardContent>
+                            <View key={badge.id} style={{ width: '48%' }}>
+                                <Card padding="md" style={{
+                                    alignItems: 'center',
+                                    gap: 6,
+                                    height: 140,
+                                    justifyContent: 'center',
+                                    opacity: badge.isUnlocked ? 1 : 0.5,
+                                }}>
+                                    <View style={{
+                                        width: 48,
+                                        height: 48,
+                                        borderRadius: 24,
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        backgroundColor: badge.isUnlocked ? colors.system.orange + '15' : colors.fill.tertiary,
+                                    }}>
+                                        {badge.isUnlocked ? (
+                                            <Text style={{ fontSize: 24 }}>{badge.icon}</Text>
+                                        ) : (
+                                            <Lock size={20} color={colors.gray[1]} />
+                                        )}
+                                    </View>
+                                    <Text style={{
+                                        fontSize: typo.footnote.fontSize,
+                                        fontFamily: 'Inter-SemiBold',
+                                        fontWeight: '600',
+                                        color: badge.isUnlocked ? colors.text.primary : colors.text.tertiary,
+                                        textAlign: 'center',
+                                    }}>
+                                        {badge.name}
+                                    </Text>
+                                    <Text style={{
+                                        fontSize: typo.caption2.fontSize,
+                                        fontFamily: 'Inter-Regular',
+                                        color: colors.text.tertiary,
+                                        textAlign: 'center',
+                                    }} numberOfLines={2}>
+                                        {badge.description}
+                                    </Text>
                                 </Card>
                             </View>
                         ))}
                     </View>
-                </ScrollView>
-            </View>
+                )}
+            </ScrollView>
         </ScreenLayout>
     );
 }
