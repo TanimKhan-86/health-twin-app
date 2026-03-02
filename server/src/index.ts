@@ -15,6 +15,7 @@ import streakRoutes from './routes/streak';
 import avatarRoutes from './routes/avatar';
 import futureRoutes from './routes/future';
 import dailyLogRoutes from './routes/dailyLog';
+import mediaRoutes from './routes/media';
 import { sendSuccess } from './lib/apiResponse';
 
 const app = express();
@@ -46,6 +47,7 @@ app.use('/api/streak', streakRoutes);
 app.use('/api/avatar', avatarRoutes);
 app.use('/api/future', futureRoutes);
 app.use('/api/daily-log', dailyLogRoutes);
+app.use('/api/media', mediaRoutes);
 
 // Health check
 app.get('/', (_req, res) => {

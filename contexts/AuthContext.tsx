@@ -126,7 +126,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
         const loginError = res.success ? 'Unknown login error' : res.error;
         console.error('[AuthContext] Login failed. Success:', res.success, 'Error:', loginError);
-        return null;
+        throw new Error(loginError || 'Login failed');
     };
 
     // ─── Logout ─────────────────────────────────────────────────────────────────

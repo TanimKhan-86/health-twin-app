@@ -51,6 +51,7 @@ export default function WhatIfScreen({ navigation }: AppScreenProps<'WhatIf'>) {
         avatarLoading,
         avatarImageUrl,
         avatarVideoByState,
+        ensureScenarioStateVideo,
     } = useScenarioAvatarLibrary();
     const [avatarVideoFailed, setAvatarVideoFailed] = useState(false);
     const [scenarioA, setScenarioA] = useState<SavedScenario | null>(null);
@@ -192,6 +193,10 @@ export default function WhatIfScreen({ navigation }: AppScreenProps<'WhatIf'>) {
     useEffect(() => {
         setAvatarVideoFailed(false);
     }, [previewVideoUrl, simulationDecision.state]);
+
+    useEffect(() => {
+        void ensureScenarioStateVideo(simulatedAvatarState);
+    }, [ensureScenarioStateVideo, simulatedAvatarState]);
 
     const loadData = async () => {
         try {

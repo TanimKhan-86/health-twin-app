@@ -2,6 +2,10 @@ import axios from 'axios';
 import crypto from 'crypto';
 import express from 'express';
 import { StateType } from '../models/AvatarAnimation';
+import {
+    isMediaRef,
+    readMediaByRef,
+} from './mediaStoreService';
 
 const STOCK_SAMPLE_VIDEO_PATTERN = /^https:\/\/storage\.googleapis\.com\/gtv-videos-bucket\/sample\//i;
 
@@ -28,6 +32,19 @@ export function safeMetadata(value: unknown): Record<string, unknown> {
 
 export function computeAvatarFingerprint(avatarImageUrl: string): string {
     return crypto.createHash('sha256').update(avatarImageUrl).digest('hex');
+}
+
+export function resolveAvatarFingerprint(
+    avatar: { avatarImageUrl?: string | null; generationMetadata?: unknown } | null | undefined
+): string | null {
+    if (!avatar) return null;
+    const metadata = safeMetadata(avatar.generationMetadata);
+    const metadataFingerprint = typeof metadata.avatarFingerprint === 'string'
+        ? metadata.avatarFingerprint
+        : null;
+    if (metadataFingerprint) return metadataFingerprint;
+    if (!avatar.avatarImageUrl) return null;
+    return computeAvatarFingerprint(avatar.avatarImageUrl);
 }
 
 export function isStockFallbackVideo(videoUrl?: string | null): boolean {
@@ -94,6 +111,16 @@ export async function resolveSourceImage(
             mimetype: parsed.mimetype,
             source: 'profile',
             profileDataUri: userProfileImage,
+        };
+    }
+
+    if (isMediaRef(userProfileImage)) {
+        const media = await readMediaByRef(userProfileImage);
+        return {
+            buffer: media.buffer,
+            mimetype: media.mimeType,
+            source: 'profile',
+            profileDataUri: toDataUri(media.buffer, media.mimeType),
         };
     }
 

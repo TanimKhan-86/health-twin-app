@@ -1,85 +1,130 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch } from "../../../lib/api/client";
 import {
-    hasAllScenarioStates,
     normalizeStateVideos,
     SCENARIO_STATES,
     ScenarioAvatarState,
 } from "./scenarioUtils";
-
-interface AvatarLibraryResponse {
-    imageUrl?: string | null;
-    videoByState?: Record<string, string>;
-}
 
 interface AvatarStateResponse {
     state?: string;
     videoUrl?: string;
     imageUrl?: string | null;
     videoByState?: Record<string, string>;
+    availableStates?: string[];
+}
+
+interface AvatarStatusResponse {
+    avatarUrl?: string | null;
+}
+
+function toScenarioState(value?: string | null): ScenarioAvatarState | null {
+    if (!value) return null;
+    const normalized = value.trim().toLowerCase();
+    if (normalized === 'happy' || normalized === 'sad' || normalized === 'sleepy') {
+        return normalized;
+    }
+    return null;
+}
+
+function mergeStateVideo(
+    current: Partial<Record<ScenarioAvatarState, string>>,
+    next?: AvatarStateResponse | null
+): Partial<Record<ScenarioAvatarState, string>> {
+    const merged = {
+        ...current,
+        ...normalizeStateVideos(next?.videoByState || {}),
+    };
+    const explicitState = toScenarioState(next?.state);
+    if (explicitState && next?.videoUrl) {
+        merged[explicitState] = next.videoUrl;
+    }
+    return merged;
 }
 
 export function useScenarioAvatarLibrary() {
     const [avatarLoading, setAvatarLoading] = useState(true);
     const [avatarImageUrl, setAvatarImageUrl] = useState<string | null>(null);
     const [avatarVideoByState, setAvatarVideoByState] = useState<Partial<Record<ScenarioAvatarState, string>>>({});
+    const avatarVideosRef = useRef<Partial<Record<ScenarioAvatarState, string>>>({});
+    const fetchingStatesRef = useRef<Set<ScenarioAvatarState>>(new Set());
+
+    const ensureScenarioStateVideo = useCallback(async (state: ScenarioAvatarState): Promise<void> => {
+        if (avatarVideosRef.current[state]) return;
+        if (fetchingStatesRef.current.has(state)) return;
+
+        fetchingStatesRef.current.add(state);
+        try {
+            const response = await apiFetch<AvatarStateResponse>(
+                `/api/avatar/state?state=${encodeURIComponent(state)}&includeMedia=true`,
+                { timeoutMs: 45_000 }
+            );
+            if (!response.success || !response.data) return;
+
+            if (response.data.imageUrl) {
+                setAvatarImageUrl((prev) => prev || response.data?.imageUrl || null);
+            }
+
+            const merged = mergeStateVideo(avatarVideosRef.current, response.data);
+            avatarVideosRef.current = merged;
+            setAvatarVideoByState(merged);
+        } catch (e) {
+            console.warn(`Avatar state media load failed (${state}):`, e);
+        } finally {
+            fetchingStatesRef.current.delete(state);
+        }
+    }, []);
 
     const reloadAvatarLibrary = useCallback(async () => {
         try {
             setAvatarLoading(true);
-            let resolvedImageUrl: string | null = null;
-            let resolvedVideos: Partial<Record<ScenarioAvatarState, string>> = {};
+            avatarVideosRef.current = {};
+            setAvatarVideoByState({});
 
-            const library = await apiFetch<AvatarLibraryResponse>('/api/avatar/library');
-            if (library.success && library.data) {
-                resolvedImageUrl = library.data.imageUrl ?? resolvedImageUrl;
-                resolvedVideos = { ...resolvedVideos, ...normalizeStateVideos(library.data.videoByState || {}) };
-            }
+            const stateMeta = await apiFetch<AvatarStateResponse>('/api/avatar/state?includeMedia=false', { timeoutMs: 12_000 });
+            let prioritizedState: ScenarioAvatarState | null = null;
+            let availableStates: ScenarioAvatarState[] = [...SCENARIO_STATES];
 
-            const fallback = await apiFetch<AvatarStateResponse>('/api/avatar/state');
-            if (fallback.success && fallback.data) {
-                resolvedImageUrl = fallback.data.imageUrl ?? resolvedImageUrl;
-                resolvedVideos = { ...resolvedVideos, ...normalizeStateVideos(fallback.data.videoByState || {}) };
-                const state = fallback.data.state as ScenarioAvatarState | undefined;
-                const videoUrl = fallback.data.videoUrl;
-                if (state && videoUrl) {
-                    resolvedVideos[state] = videoUrl;
+            if (stateMeta.success && stateMeta.data) {
+                if (stateMeta.data.imageUrl) {
+                    setAvatarImageUrl(stateMeta.data.imageUrl);
                 }
-            }
-
-            if (!hasAllScenarioStates(resolvedVideos)) {
-                const missingStates = SCENARIO_STATES.filter((state) => !resolvedVideos[state]);
-                const stateFetches = await Promise.all(
-                    missingStates.map(async (state) => {
-                        const response = await apiFetch<AvatarStateResponse>(
-                            `/api/avatar/state?state=${encodeURIComponent(state)}`
-                        );
-                        if (!response.success || !response.data?.videoUrl) return null;
-                        return {
-                            state,
-                            videoUrl: response.data.videoUrl,
-                            imageUrl: response.data.imageUrl ?? null,
-                        };
-                    })
-                );
-
-                for (const result of stateFetches) {
-                    if (!result) continue;
-                    resolvedVideos[result.state] = result.videoUrl;
-                    if (!resolvedImageUrl && result.imageUrl) {
-                        resolvedImageUrl = result.imageUrl;
+                const normalizedState = toScenarioState(stateMeta.data.state);
+                if (normalizedState) prioritizedState = normalizedState;
+                if (Array.isArray(stateMeta.data.availableStates) && stateMeta.data.availableStates.length > 0) {
+                    const filtered = stateMeta.data.availableStates
+                        .map((state) => toScenarioState(state))
+                        .filter((state): state is ScenarioAvatarState => !!state);
+                    if (filtered.length > 0) {
+                        availableStates = Array.from(new Set(filtered));
                     }
                 }
+            } else {
+                const status = await apiFetch<AvatarStatusResponse>('/api/avatar/status');
+                if (status.success && status.data?.avatarUrl) {
+                    setAvatarImageUrl(status.data.avatarUrl);
+                }
             }
 
-            setAvatarImageUrl(resolvedImageUrl);
-            setAvatarVideoByState(resolvedVideos);
+            const prioritizedOrder = prioritizedState
+                ? [prioritizedState, ...availableStates.filter((state) => state !== prioritizedState)]
+                : availableStates;
+
+            if (prioritizedOrder[0]) {
+                void ensureScenarioStateVideo(prioritizedOrder[0]);
+            }
+
+            void (async () => {
+                for (const state of prioritizedOrder.slice(1)) {
+                    await ensureScenarioStateVideo(state);
+                }
+            })();
         } catch (e) {
             console.warn('Avatar library load error:', e);
         } finally {
             setAvatarLoading(false);
         }
-    }, []);
+    }, [ensureScenarioStateVideo]);
 
     useEffect(() => {
         reloadAvatarLibrary();
@@ -89,6 +134,7 @@ export function useScenarioAvatarLibrary() {
         avatarLoading,
         avatarImageUrl,
         avatarVideoByState,
+        ensureScenarioStateVideo,
         reloadAvatarLibrary,
     };
 }

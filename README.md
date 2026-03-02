@@ -55,6 +55,15 @@ git clone https://github.com/TanimKhan-86/health-twin-app.git
 cd health-twin-app
 ```
 
+### Demo Login (Examiner / Developer)
+
+Use this test account for the prototype:
+
+- Email: `elora.demo@healthtwin.app`
+- Password: `HealthTwinDemo#2026`
+
+If needed, reset via `POST /api/auth/reset-password` (prototype flow).
+
 ---
 
 ### 2. Start the Backend
@@ -107,6 +116,7 @@ npx expo start
 |---|---|---|---|
 | POST | `/api/auth/register` | ❌ | Create account |
 | POST | `/api/auth/login` | ❌ | Login + get JWT |
+| POST | `/api/auth/reset-password` | ❌ | Prototype reset (email + new password) |
 | GET | `/api/auth/me` | ✅ | Get current user |
 | GET | `/api/health?days=7` | ✅ | Get health entries |
 | POST | `/api/health` | ✅ | Add health entry |
@@ -124,6 +134,13 @@ npx expo start
 
 All protected routes require: `Authorization: Bearer <token>`
 
+### Auth Security Notes
+
+- JWT lifetime is `7d` (shortened from long-lived tokens for safer demos).
+- Login protection on `/api/auth/login`: max `5` failures in `15` minutes per `email + IP`.
+- Temporary lockout: `10` minutes after threshold is reached.
+- Password reset endpoint is prototype-grade (no email OTP/token yet).
+
 ---
 
 ## 🧰 Tech Stack
@@ -133,7 +150,7 @@ All protected routes require: `Authorization: Bearer <token>`
 | Frontend | React Native, Expo, NativeWind |
 | Backend | Node.js, Express, TypeScript |
 | Database | MongoDB Atlas (Mongoose) |
-| Auth | JWT (30-day tokens) |
+| Auth | JWT (7-day tokens) + login rate limiting/temporary lockout |
 
 ---
 

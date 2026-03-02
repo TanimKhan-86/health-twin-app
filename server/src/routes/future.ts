@@ -1,5 +1,4 @@
 import { Router, Response } from 'express';
-import crypto from 'crypto';
 import { z } from 'zod';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import HealthEntry from '../models/HealthEntry';
@@ -9,6 +8,15 @@ import { AvatarAnimation } from '../models/AvatarAnimation';
 import { getUtcDayKey, shiftUtcDays, toUtcDayStart } from '../lib/dateUtils';
 import { getErrorMessage, sendError, sendSuccess } from '../lib/apiResponse';
 import { parseQuery, QUERY_LIMITS } from '../lib/validation';
+import {
+    isAvatarBasedAnimation,
+    resolveAvatarFingerprint,
+    safeMetadata,
+} from '../services/avatarMediaService';
+import {
+    ensureMediaRefFromValue,
+    resolveMediaUrlForClient,
+} from '../services/mediaStoreService';
 
 type FutureState = 'happy' | 'sad' | 'sleepy';
 
@@ -29,8 +37,9 @@ interface MoodSignal {
 }
 
 interface AvatarAnimationSignal {
+    _id?: unknown;
     stateType: FutureState;
-    videoUrl?: string;
+    videoUrl?: string | null;
     generationMetadata?: unknown;
 }
 
@@ -56,10 +65,6 @@ const insightQuerySchema = z.object({
         .max(QUERY_LIMITS.futureDays.max)
         .default(QUERY_LIMITS.futureDays.default),
 });
-
-function computeAvatarFingerprint(avatarImageUrl: string): string {
-    return crypto.createHash('sha256').update(avatarImageUrl).digest('hex');
-}
 
 function toNumber(value: unknown, fallback = 0): number {
     const n = Number(value);
@@ -131,23 +136,49 @@ function selectTopState(
     return winners[0] || 'sad';
 }
 
-function safeMetadata(value: unknown): Record<string, unknown> {
-    return value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
+function isUsableAnimation(animation: AvatarAnimationSignal, avatarFingerprint?: string | null): boolean {
+    return isAvatarBasedAnimation(
+        {
+            videoUrl: animation.videoUrl ?? undefined,
+            generationMetadata: safeMetadata(animation.generationMetadata),
+        },
+        avatarFingerprint
+    );
 }
 
-function isUsableAnimation(animation: AvatarAnimationSignal, avatarFingerprint?: string | null): boolean {
-    const videoUrl = typeof animation.videoUrl === 'string' ? animation.videoUrl : null;
-    if (!videoUrl) return false;
-
-    const metadata = safeMetadata(animation.generationMetadata);
-    const provider = typeof metadata.provider === 'string' ? metadata.provider : '';
-    const animationFingerprint = typeof metadata.avatarFingerprint === 'string' ? metadata.avatarFingerprint : null;
-
-    if (avatarFingerprint && animationFingerprint) {
-        return animationFingerprint === avatarFingerprint;
+async function ensureFutureAvatarImageStored(
+    userId: string,
+    avatar: { _id?: unknown; avatarImageUrl?: string | null } | null
+): Promise<string | null> {
+    if (!avatar?.avatarImageUrl) return null;
+    const normalized = await ensureMediaRefFromValue(
+        avatar.avatarImageUrl,
+        { userId, kind: 'avatar-image' },
+        'avatar-image'
+    );
+    if (normalized && normalized !== avatar.avatarImageUrl && avatar._id) {
+        await Avatar.updateOne({ _id: avatar._id }, { $set: { avatarImageUrl: normalized } });
+        avatar.avatarImageUrl = normalized;
     }
-    if (videoUrl.startsWith('data:video/')) return true;
-    return provider === 'prebuilt_seed' || provider.startsWith('prebuilt_') || provider.startsWith('nanobana_');
+    return normalized ?? null;
+}
+
+async function ensureFutureAnimationVideoStored(
+    userId: string,
+    stateType: FutureState,
+    animation: { _id?: unknown; videoUrl?: string | null } | null
+): Promise<string | null> {
+    if (!animation?.videoUrl) return null;
+    const normalized = await ensureMediaRefFromValue(
+        animation.videoUrl,
+        { userId, kind: 'avatar-video', stateType },
+        `avatar-video-${stateType}`
+    );
+    if (normalized && normalized !== animation.videoUrl && animation._id) {
+        await AvatarAnimation.updateOne({ _id: animation._id }, { $set: { videoUrl: normalized } });
+        animation.videoUrl = normalized;
+    }
+    return normalized ?? null;
 }
 
 router.get('/insight', async (req: AuthRequest, res: Response): Promise<void> => {
@@ -178,8 +209,11 @@ router.get('/insight', async (req: AuthRequest, res: Response): Promise<void> =>
             MoodEntry.findOne({ userId })
                 .sort({ date: -1, updatedAt: -1, createdAt: -1 })
                 .lean<MoodSignal | null>(),
-            Avatar.findOne({ userId }).lean<{ avatarImageUrl?: string } | null>(),
+            Avatar.findOne({ userId })
+                .select('avatarImageUrl generationMetadata')
+                .lean<{ _id?: unknown; avatarImageUrl?: string; generationMetadata?: unknown } | null>(),
             AvatarAnimation.find({ userId, stateType: { $in: FUTURE_STATES } })
+                .select('stateType videoUrl generationMetadata')
                 .lean<AvatarAnimationSignal[]>(),
         ]);
 
@@ -233,11 +267,24 @@ router.get('/insight', async (req: AuthRequest, res: Response): Promise<void> =>
             ? 'No 7-day activity data found yet. Seed demo data first, then Future You can project a trend.'
             : `In the last ${query.days} days, "${dominantState}" was dominant (${dominantPercent}% of tracked days). If your current pattern continues, you are likely to feel "${projectedState}" most of the time from next week onward.`;
 
-        const avatarFingerprint = avatar?.avatarImageUrl ? computeAvatarFingerprint(avatar.avatarImageUrl) : null;
-        const usableAnimations = animations.filter((animation) => isUsableAnimation(animation, avatarFingerprint));
+        await ensureFutureAvatarImageStored(userId, avatar);
+        const avatarFingerprint = resolveAvatarFingerprint(avatar);
+
+        const normalizedAnimations: AvatarAnimationSignal[] = [];
+        for (const animation of animations) {
+            const normalizedVideo = await ensureFutureAnimationVideoStored(userId, animation.stateType, animation);
+            if (!normalizedVideo) continue;
+            normalizedAnimations.push({
+                ...animation,
+                videoUrl: normalizedVideo,
+            });
+        }
+
+        const usableAnimations = normalizedAnimations.filter((animation) => isUsableAnimation(animation, avatarFingerprint));
         const animationMap = usableAnimations.reduce<Partial<Record<FutureState, string>>>((acc, animation) => {
             if (animation.videoUrl) {
-                acc[animation.stateType] = animation.videoUrl;
+                const resolved = resolveMediaUrlForClient(req, animation.videoUrl) || animation.videoUrl;
+                acc[animation.stateType] = resolved;
             }
             return acc;
         }, {});
@@ -272,7 +319,7 @@ router.get('/insight', async (req: AuthRequest, res: Response): Promise<void> =>
             },
             insight,
             media: {
-                imageUrl: avatar?.avatarImageUrl ?? null,
+                imageUrl: resolveMediaUrlForClient(req, avatar?.avatarImageUrl ?? null),
                 projectedVideoUrl,
                 availableStates: Object.keys(animationMap),
             },

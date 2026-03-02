@@ -9,6 +9,8 @@ import { getLocalDateYmd } from "../lib/date/localDay";
 interface AvatarStatePayload {
     state: string;
     videoUrl?: string;
+    videoByState?: Record<string, string>;
+    availableStates?: string[];
     imageUrl?: string | null;
     reasoning?: string;
 }
@@ -17,6 +19,7 @@ interface AvatarStatusPayload {
     hasAvatar?: boolean;
     ready?: boolean;
     pendingStates?: string[];
+    avatarUrl?: string | null;
 }
 
 type UnavailableReason = 'setup_required' | 'seed_required' | 'no_logs' | 'media_unavailable';
@@ -74,6 +77,8 @@ export function DigitalTwinAvatar() {
     const [unavailableReason, setUnavailableReason] = useState<UnavailableReason | null>(null);
     const [unavailableDetail, setUnavailableDetail] = useState<string | null>(null);
     const hasLoadedRef = useRef(false);
+    const videoCacheRef = useRef<Record<string, string>>({});
+    const prefetchingStatesRef = useRef<Set<string>>(new Set());
 
     useEffect(() => {
         // Audio API is native-only — skip on web to prevent crash
@@ -89,6 +94,85 @@ export function DigitalTwinAvatar() {
             });
         }
     }, []);
+
+    useEffect(() => {
+        let isMounted = true;
+        (async () => {
+            try {
+                const status = await apiFetch<AvatarStatusPayload>('/api/avatar/status');
+                if (!isMounted || !status.success) return;
+                const statusImage = status.data?.avatarUrl ?? null;
+                if (statusImage) {
+                    setImageUrl(prev => prev || statusImage);
+                }
+            } catch {
+                // Best-effort prefetch only.
+            }
+        })();
+        return () => {
+            isMounted = false;
+        };
+    }, []);
+
+    const normalizeState = useCallback((state: string | null | undefined): string | null => {
+        if (!state) return null;
+        const normalized = state.trim().toLowerCase();
+        return normalized.length ? normalized : null;
+    }, []);
+
+    const cacheMediaFromPayload = useCallback((payload?: AvatarStatePayload | null): void => {
+        if (!payload) return;
+        const stateFromPayload = normalizeState(payload.state);
+        if (stateFromPayload && payload.videoUrl) {
+            videoCacheRef.current[stateFromPayload] = payload.videoUrl;
+        }
+        if (payload.videoByState) {
+            Object.entries(payload.videoByState).forEach(([rawState, url]) => {
+                const state = normalizeState(rawState);
+                if (!state || typeof url !== 'string' || !url) return;
+                videoCacheRef.current[state] = url;
+            });
+        }
+    }, [normalizeState]);
+
+    const warmStateVideo = useCallback(async (dayKey: string, state: string): Promise<void> => {
+        const normalized = normalizeState(state);
+        if (!normalized) return;
+        if (videoCacheRef.current[normalized]) return;
+        if (prefetchingStatesRef.current.has(normalized)) return;
+
+        prefetchingStatesRef.current.add(normalized);
+        try {
+            const response = await apiFetch<AvatarStatePayload>(
+                `/api/avatar/state?date=${encodeURIComponent(dayKey)}&state=${encodeURIComponent(normalized)}&includeMedia=true`,
+                { timeoutMs: 45_000 }
+            );
+            if (!response.success) return;
+            cacheMediaFromPayload(response.data);
+        } catch {
+            // Best-effort prefetch only.
+        } finally {
+            prefetchingStatesRef.current.delete(normalized);
+        }
+    }, [cacheMediaFromPayload, normalizeState]);
+
+    const prefetchMissingStateVideos = useCallback((dayKey: string, rawStates?: string[], currentState?: string | null): void => {
+        if (!Array.isArray(rawStates) || rawStates.length === 0) return;
+        const normalizedCurrent = normalizeState(currentState);
+        const queue = rawStates
+            .map((state) => normalizeState(state))
+            .filter((state): state is string => !!state)
+            .filter((state) => state !== normalizedCurrent)
+            .filter((state) => !videoCacheRef.current[state])
+            .filter((state) => !prefetchingStatesRef.current.has(state));
+        if (queue.length === 0) return;
+
+        void (async () => {
+            for (const state of queue) {
+                await warmStateVideo(dayKey, state);
+            }
+        })();
+    }, [normalizeState, warmStateVideo]);
 
     const resolveUnavailableReason = useCallback(async (sourceMessage?: string): Promise<{ reason: UnavailableReason; detail: string }> => {
         const lowered = (sourceMessage || '').toLowerCase();
@@ -153,21 +237,55 @@ export function DigitalTwinAvatar() {
             setUnavailableReason(null);
             setUnavailableDetail(null);
             const dayKey = getLocalDateYmd();
-            const res = await apiFetch<AvatarStatePayload>(`/api/avatar/state?date=${encodeURIComponent(dayKey)}`);
 
-            if (!res.success) {
-                const unavailable = await resolveUnavailableReason(res.error);
+            const stateOnly = await apiFetch<AvatarStatePayload>(
+                `/api/avatar/state?date=${encodeURIComponent(dayKey)}&includeMedia=false`,
+                { timeoutMs: 12_000 }
+            );
+
+            if (!stateOnly.success) {
+                const unavailable = await resolveUnavailableReason(stateOnly.error);
                 setUnavailableReason(unavailable.reason);
                 setUnavailableDetail(unavailable.detail);
-                throw new Error(res.error);
+                throw new Error(stateOnly.error);
             }
-            const nextImage = res.data?.imageUrl ?? null;
-            const nextVideo = res.data?.videoUrl ?? null;
-            setAvatarState(res.data?.state ?? null);
-            setImageUrl(nextImage);
+            const nextState = normalizeState(stateOnly.data?.state);
+            const nextImage = stateOnly.data?.imageUrl ?? null;
+            setAvatarState(nextState);
+            if (nextImage) {
+                setImageUrl(nextImage);
+            }
+            prefetchMissingStateVideos(dayKey, stateOnly.data?.availableStates, nextState);
 
-            if (nextVideo) {
-                setVideoUrl(prev => (prev === nextVideo ? prev : nextVideo));
+            const cachedVideo = nextState ? videoCacheRef.current[nextState] ?? null : null;
+            if (cachedVideo) {
+                setVideoUrl(prev => (prev === cachedVideo ? prev : cachedVideo));
+                setVideoFailed(false);
+                return;
+            }
+
+            const requestedStateSegment = nextState ? `&state=${encodeURIComponent(nextState)}` : '';
+            const mediaRes = await apiFetch<AvatarStatePayload>(
+                `/api/avatar/state?date=${encodeURIComponent(dayKey)}${requestedStateSegment}&includeMedia=true`,
+                { timeoutMs: 45_000 }
+            );
+
+            if (!mediaRes.success) {
+                const unavailable = await resolveUnavailableReason(mediaRes.error);
+                setUnavailableReason(unavailable.reason);
+                setUnavailableDetail(unavailable.detail);
+                throw new Error(mediaRes.error);
+            }
+
+            cacheMediaFromPayload(mediaRes.data);
+            prefetchMissingStateVideos(dayKey, mediaRes.data?.availableStates, nextState);
+            const resolvedState = normalizeState(mediaRes.data?.state) ?? nextState;
+            const resolvedVideo = resolvedState ? videoCacheRef.current[resolvedState] ?? null : null;
+            if (resolvedState) {
+                setAvatarState(resolvedState);
+            }
+            if (resolvedVideo) {
+                setVideoUrl(prev => (prev === resolvedVideo ? prev : resolvedVideo));
                 setVideoFailed(false);
                 return;
             }
@@ -176,7 +294,7 @@ export function DigitalTwinAvatar() {
             const unavailable = await resolveUnavailableReason('No avatar video available');
             setUnavailableReason(unavailable.reason);
             setUnavailableDetail(unavailable.detail);
-            if (!nextImage) {
+            if (!nextImage && !mediaRes.data?.imageUrl) {
                 throw new Error('No avatar media available yet');
             }
         } catch (e: unknown) {
@@ -188,12 +306,12 @@ export function DigitalTwinAvatar() {
                 hasLoadedRef.current = true;
             }
         }
-    }, [resolveUnavailableReason]);
+    }, [cacheMediaFromPayload, normalizeState, resolveUnavailableReason]);
 
     useEffect(() => {
         fetchState();
-        // Poll every minute to react to changing health/mood state.
-        const interval = setInterval(fetchState, 60000);
+        // Poll frequently so post-log state changes appear quickly.
+        const interval = setInterval(fetchState, 15000);
         return () => clearInterval(interval);
     }, [fetchState]);
 

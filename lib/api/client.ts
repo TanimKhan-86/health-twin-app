@@ -29,6 +29,7 @@ export async function removeToken(): Promise<void> {
 // ─── Core Fetch Wrapper ────────────────────────────────────────────────────────
 interface ApiOptions extends RequestInit {
     auth?: boolean; // Set to true to include Authorization header
+    timeoutMs?: number;
 }
 
 type ApiResponse<T = unknown> = ApiEnvelope<T>;
@@ -71,12 +72,12 @@ function getApiBaseCandidates(): string[] {
     return candidates;
 }
 
-async function fetchWithTimeout(url: string, init: RequestInit): Promise<Response> {
+async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
     if (typeof AbortController === 'undefined') {
         return fetch(url, init);
     }
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
         return await fetch(url, { ...init, signal: controller.signal });
     } finally {
@@ -88,7 +89,7 @@ export async function apiFetch<T = unknown>(
     path: string,
     options: ApiOptions = {}
 ): Promise<ApiResponse<T>> {
-    const { auth = false, ...fetchOptions } = options;
+    const { auth = false, timeoutMs = REQUEST_TIMEOUT_MS, ...fetchOptions } = options;
     const incomingHeaders = (fetchOptions.headers as Record<string, string> | undefined) ?? {};
     const isFormData = typeof FormData !== 'undefined' && fetchOptions.body instanceof FormData;
     const hasContentType = Object.keys(incomingHeaders).some(k => k.toLowerCase() === 'content-type');
@@ -111,7 +112,7 @@ export async function apiFetch<T = unknown>(
             const response = await fetchWithTimeout(`${base}${path}`, {
                 ...fetchOptions,
                 headers,
-            });
+            }, timeoutMs);
 
             let json: unknown;
             try {
@@ -162,7 +163,7 @@ export async function apiFetch<T = unknown>(
             const networkError = error as { name?: string; message?: string };
             const isAbort = networkError?.name === 'AbortError';
             lastNetworkError = isAbort
-                ? `Request timed out after ${Math.round(REQUEST_TIMEOUT_MS / 1000)}s`
+                ? `Request timed out after ${Math.round(timeoutMs / 1000)}s`
                 : (networkError?.message || 'Network error – check your API URL and connection');
             continue;
         }

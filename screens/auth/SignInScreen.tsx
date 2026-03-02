@@ -9,6 +9,7 @@ import { CircuitBoard } from "lucide-react-native";
 import { useAuth } from "../../contexts/AuthContext";
 import { LinearGradient } from "expo-linear-gradient";
 import { TextInput } from "react-native";
+import { apiFetch } from "../../lib/api/client";
 import type { AppScreenProps } from "../../lib/navigation/types";
 
 export default function SignInScreen({ navigation }: AppScreenProps<'SignIn'>) {
@@ -19,10 +20,22 @@ export default function SignInScreen({ navigation }: AppScreenProps<'SignIn'>) {
     const [touched, setTouched] = useState({ email: false, password: false });
     const [isLoading, setIsLoading] = useState(false);
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
+    const [showResetPanel, setShowResetPanel] = useState(false);
+    const [resetEmail, setResetEmail] = useState("");
+    const [resetPassword, setResetPassword] = useState("");
+    const [resetConfirmPassword, setResetConfirmPassword] = useState("");
+    const [resetLoading, setResetLoading] = useState(false);
+    const [resetErrorMsg, setResetErrorMsg] = useState<string | null>(null);
+    const [resetSuccessMsg, setResetSuccessMsg] = useState<string | null>(null);
     const normalizedEmail = email.trim().toLowerCase();
     const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail);
     const passwordValid = password.length >= 6;
     const canSubmit = emailValid && passwordValid && !isLoading;
+    const normalizedResetEmail = resetEmail.trim().toLowerCase();
+    const resetEmailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedResetEmail);
+    const resetPasswordValid = resetPassword.length >= 8;
+    const resetPasswordsMatch = resetPassword === resetConfirmPassword;
+    const canSubmitReset = resetEmailValid && resetPasswordValid && resetPasswordsMatch && !resetLoading;
 
     const handleLogin = async () => {
         setErrorMsg(null);
@@ -39,10 +52,66 @@ export default function SignInScreen({ navigation }: AppScreenProps<'SignIn'>) {
             if (!user) {
                 setErrorMsg("Invalid email or password.");
             }
-        } catch {
-            setErrorMsg("Something went wrong. Please try again.");
+        } catch (error: unknown) {
+            setErrorMsg(error instanceof Error ? error.message : "Something went wrong. Please try again.");
         } finally {
             setIsLoading(false);
+        }
+    };
+
+    const handleForgotPasswordPress = () => {
+        if (!showResetPanel && !resetEmail && normalizedEmail) {
+            setResetEmail(normalizedEmail);
+        }
+        setResetErrorMsg(null);
+        setResetSuccessMsg(null);
+        setShowResetPanel((prev) => !prev);
+    };
+
+    const handleResetPassword = async () => {
+        setResetErrorMsg(null);
+        setResetSuccessMsg(null);
+
+        if (!resetEmailValid) {
+            setResetErrorMsg("Enter a valid email address.");
+            return;
+        }
+        if (!resetPasswordValid) {
+            setResetErrorMsg("New password must be at least 8 characters.");
+            return;
+        }
+        if (!resetPasswordsMatch) {
+            setResetErrorMsg("New passwords do not match.");
+            return;
+        }
+
+        setResetLoading(true);
+        try {
+            const res = await apiFetch<{ message?: string }>('/api/auth/reset-password', {
+                method: 'POST',
+                body: JSON.stringify({
+                    email: normalizedResetEmail,
+                    newPassword: resetPassword,
+                }),
+            });
+
+            if (!res.success) {
+                setResetErrorMsg(res.error || 'Could not reset password.');
+                return;
+            }
+
+            setShowResetPanel(false);
+            setResetSuccessMsg(res.data?.message || 'Password reset successful. Sign in with your new password.');
+            setEmail(normalizedResetEmail);
+            setPassword("");
+            setResetPassword("");
+            setResetConfirmPassword("");
+            setTouched((prev) => ({ ...prev, password: false }));
+            setErrorMsg(null);
+        } catch (error: unknown) {
+            setResetErrorMsg(error instanceof Error ? error.message : 'Could not reset password.');
+        } finally {
+            setResetLoading(false);
         }
     };
 
@@ -66,6 +135,11 @@ export default function SignInScreen({ navigation }: AppScreenProps<'SignIn'>) {
                 {errorMsg ? (
                     <View style={styles.errorBox}>
                         <Text style={styles.errorText}>{errorMsg}</Text>
+                    </View>
+                ) : null}
+                {resetSuccessMsg ? (
+                    <View style={styles.successBox}>
+                        <Text style={styles.successText}>{resetSuccessMsg}</Text>
                     </View>
                 ) : null}
 
@@ -117,6 +191,53 @@ export default function SignInScreen({ navigation }: AppScreenProps<'SignIn'>) {
                         {passwordValid ? "Password length is valid." : "Password must be at least 6 characters."}
                     </Text>
                 )}
+                <TouchableOpacity style={styles.forgotBtn} onPress={handleForgotPasswordPress}>
+                    <Text style={styles.forgotText}>{showResetPanel ? "Close reset" : "Forgot Password?"}</Text>
+                </TouchableOpacity>
+
+                {showResetPanel ? (
+                    <View style={styles.resetPanel}>
+                        <Text style={styles.resetTitle}>Reset Password</Text>
+                        <Text style={styles.resetSub}>Prototype mode: reset using email + new password.</Text>
+                        {resetErrorMsg ? <Text style={styles.resetErrorText}>{resetErrorMsg}</Text> : null}
+                        <TextInput
+                            style={styles.input}
+                            placeholder="Account Email"
+                            placeholderTextColor="#a78bfa"
+                            value={resetEmail}
+                            onChangeText={setResetEmail}
+                            autoCapitalize="none"
+                            keyboardType="email-address"
+                        />
+                        <TextInput
+                            style={styles.input}
+                            placeholder="New Password"
+                            placeholderTextColor="#a78bfa"
+                            value={resetPassword}
+                            onChangeText={setResetPassword}
+                            secureTextEntry
+                        />
+                        <TextInput
+                            style={styles.input}
+                            placeholder="Confirm New Password"
+                            placeholderTextColor="#a78bfa"
+                            value={resetConfirmPassword}
+                            onChangeText={setResetConfirmPassword}
+                            secureTextEntry
+                        />
+                        <TouchableOpacity onPress={handleResetPassword} disabled={!canSubmitReset} activeOpacity={0.85}>
+                            <LinearGradient
+                                colors={canSubmitReset ? ["#2563eb", "#1d4ed8"] : ["#93c5fd", "#60a5fa"]}
+                                start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+                                style={styles.resetBtn}
+                            >
+                                {resetLoading
+                                    ? <ActivityIndicator color="#fff" />
+                                    : <Text style={styles.resetBtnText}>Reset Password</Text>}
+                            </LinearGradient>
+                        </TouchableOpacity>
+                    </View>
+                ) : null}
 
                 <TouchableOpacity onPress={handleLogin} disabled={!canSubmit} activeOpacity={0.85}>
                     <LinearGradient
@@ -181,6 +302,8 @@ const styles = StyleSheet.create({
 
     errorBox: { backgroundColor: '#fee2e2', padding: 12, borderRadius: 12, marginBottom: 16, borderWidth: 1, borderColor: '#fca5a5' },
     errorText: { color: '#dc2626', fontSize: 14, textAlign: 'center', fontWeight: '500' },
+    successBox: { backgroundColor: '#dcfce7', padding: 12, borderRadius: 12, marginBottom: 16, borderWidth: 1, borderColor: '#86efac' },
+    successText: { color: '#166534', fontSize: 13, textAlign: 'center', fontWeight: '600' },
 
     input: {
         backgroundColor: '#f5f3ff',
@@ -232,6 +355,52 @@ const styles = StyleSheet.create({
     eyeBtnText: {
         color: '#6d28d9',
         fontSize: 12,
+        fontWeight: '700',
+    },
+    forgotBtn: {
+        alignSelf: 'flex-end',
+        marginTop: -2,
+        marginBottom: 12,
+    },
+    forgotText: {
+        color: '#6d28d9',
+        fontSize: 12,
+        fontWeight: '700',
+    },
+    resetPanel: {
+        borderWidth: 1,
+        borderColor: '#dbeafe',
+        backgroundColor: '#eff6ff',
+        borderRadius: 14,
+        padding: 12,
+        marginBottom: 12,
+    },
+    resetTitle: {
+        color: '#1e3a8a',
+        fontSize: 14,
+        fontWeight: '800',
+        marginBottom: 2,
+    },
+    resetSub: {
+        color: '#475569',
+        fontSize: 12,
+        marginBottom: 10,
+    },
+    resetErrorText: {
+        color: '#b91c1c',
+        fontSize: 12,
+        fontWeight: '600',
+        marginBottom: 8,
+    },
+    resetBtn: {
+        borderRadius: 12,
+        paddingVertical: 12,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    resetBtnText: {
+        color: '#ffffff',
+        fontSize: 14,
         fontWeight: '700',
     },
 

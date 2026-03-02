@@ -17,10 +17,15 @@ import {
     computeAvatarFingerprint,
     isAvatarBasedAnimation,
     resolveSourceImage,
+    resolveAvatarFingerprint,
     safeMetadata,
     SourceImage,
-    toDataUri,
 } from '../services/avatarMediaService';
+import {
+    ensureMediaRefFromValue,
+    resolveMediaUrlForClient,
+    storeBufferAsMediaRef,
+} from '../services/mediaStoreService';
 
 interface AuthRequest extends express.Request {
     userId?: string;
@@ -40,7 +45,124 @@ const ACTIVE_AVATAR_STATES: StateType[] = AVATAR_MODE === 'nanobana' ? NANO_BANA
 const avatarStateQuerySchema = z.object({
     state: z.enum(['happy', 'sad', 'sleepy', 'tired']).optional(),
     date: z.string().trim().optional(),
+    includeMedia: z.union([z.string(), z.boolean()]).optional(),
 });
+
+interface AnimationStatusSignal {
+    stateType: StateType;
+    generationMetadata?: Record<string, unknown>;
+}
+
+interface AvatarVideoCacheEntry {
+    videoUrl: string;
+    cachedAt: number;
+}
+
+const AVATAR_VIDEO_CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
+const avatarVideoCache = new Map<string, AvatarVideoCacheEntry>();
+
+function parseIncludeMedia(value: string | boolean | undefined): boolean {
+    if (typeof value === 'boolean') return value;
+    if (typeof value !== 'string') return true;
+    const normalized = value.trim().toLowerCase();
+    if (normalized === 'false' || normalized === '0' || normalized === 'no') return false;
+    return true;
+}
+
+function buildAvatarCacheKey(userId: string, state: StateType, avatarFingerprint?: string | null): string {
+    return `${userId}::${avatarFingerprint || 'no-fingerprint'}::${state}`;
+}
+
+function readCachedAvatarVideo(userId: string, state: StateType, avatarFingerprint?: string | null): string | null {
+    const key = buildAvatarCacheKey(userId, state, avatarFingerprint);
+    const cached = avatarVideoCache.get(key);
+    if (!cached) return null;
+    if (Date.now() - cached.cachedAt > AVATAR_VIDEO_CACHE_TTL_MS) {
+        avatarVideoCache.delete(key);
+        return null;
+    }
+    return cached.videoUrl;
+}
+
+function writeCachedAvatarVideo(userId: string, state: StateType, videoUrl: string, avatarFingerprint?: string | null): void {
+    const key = buildAvatarCacheKey(userId, state, avatarFingerprint);
+    avatarVideoCache.set(key, {
+        videoUrl,
+        cachedAt: Date.now(),
+    });
+}
+
+async function ensureAvatarImageStored(
+    userId: string,
+    avatar: { _id?: unknown; avatarImageUrl?: string | null } | null
+): Promise<string | null> {
+    if (!avatar?.avatarImageUrl) return null;
+    const normalized = await ensureMediaRefFromValue(
+        avatar.avatarImageUrl,
+        { userId, kind: 'avatar-image' },
+        'avatar-image'
+    );
+    if (normalized && normalized !== avatar.avatarImageUrl && avatar._id) {
+        await Avatar.updateOne({ _id: avatar._id }, { $set: { avatarImageUrl: normalized } });
+        avatar.avatarImageUrl = normalized;
+    }
+    return normalized ?? null;
+}
+
+async function ensureUserProfileImageStored(
+    userId: string,
+    user: { _id?: unknown; profileImage?: string | null } | null
+): Promise<string | null> {
+    if (!user?.profileImage) return null;
+    const normalized = await ensureMediaRefFromValue(
+        user.profileImage,
+        { userId, kind: 'profile-image' },
+        'profile-image'
+    );
+    if (normalized && normalized !== user.profileImage && user._id) {
+        await User.updateOne({ _id: user._id }, { $set: { profileImage: normalized } });
+        user.profileImage = normalized;
+    }
+    return normalized ?? null;
+}
+
+async function ensureAnimationVideoStored(
+    userId: string,
+    stateType: StateType,
+    animation: { _id?: unknown; videoUrl?: string | null } | null
+): Promise<string | null> {
+    if (!animation?.videoUrl) return null;
+    const normalized = await ensureMediaRefFromValue(
+        animation.videoUrl,
+        { userId, kind: 'avatar-video', stateType },
+        `avatar-video-${stateType}`
+    );
+    if (normalized && normalized !== animation.videoUrl && animation._id) {
+        await AvatarAnimation.updateOne({ _id: animation._id }, { $set: { videoUrl: normalized } });
+        animation.videoUrl = normalized;
+    }
+    return normalized ?? null;
+}
+
+function isGeneratedForAvatar(
+    generationMetadata: unknown,
+    avatarFingerprint?: string | null
+): boolean {
+    const metadata = safeMetadata(generationMetadata);
+    const provider = typeof metadata.provider === 'string' ? metadata.provider : '';
+    const animationFingerprint = typeof metadata.avatarFingerprint === 'string'
+        ? metadata.avatarFingerprint
+        : null;
+
+    if (avatarFingerprint) {
+        return animationFingerprint === avatarFingerprint;
+    }
+
+    return provider === 'nanobana_google'
+        || provider === 'nanobana_reused'
+        || provider === 'nanobana_surrogate'
+        || provider.startsWith('prebuilt_');
+}
 
 const upload = multer({
     storage: multer.memoryStorage(),
@@ -71,7 +193,12 @@ router.post('/setup', requireAuth, upload.single('photo'), async (req: AuthReque
 
         if (AVATAR_MODE === 'prebuilt') {
             if (req.file) {
-                user.profileImage = toDataUri(req.file.buffer, req.file.mimetype || 'image/jpeg');
+                user.profileImage = await storeBufferAsMediaRef(
+                    req.file.buffer,
+                    req.file.mimetype || 'image/jpeg',
+                    { userId, kind: 'profile-image' },
+                    'profile-image'
+                );
                 await user.save();
             }
 
@@ -80,7 +207,9 @@ router.post('/setup', requireAuth, upload.single('photo'), async (req: AuthReque
                 AvatarAnimation.find({ userId, stateType: { $in: ACTIVE_AVATAR_STATES } }),
             ]);
 
-            const avatarFingerprint = avatar?.avatarImageUrl ? computeAvatarFingerprint(avatar.avatarImageUrl) : null;
+            await ensureUserProfileImageStored(userId, user);
+            await ensureAvatarImageStored(userId, avatar);
+            const avatarFingerprint = resolveAvatarFingerprint(avatar);
             const generatedStates = Array.from(
                 new Set(
                     animations
@@ -96,8 +225,8 @@ router.post('/setup', requireAuth, upload.single('photo'), async (req: AuthReque
             sendSuccess(res, {
                 mode: AVATAR_MODE,
                 avatarId: avatar?._id ?? null,
-                imageUrl: avatar?.avatarImageUrl ?? null,
-                profileImage: user.profileImage ?? null,
+                imageUrl: resolveMediaUrlForClient(req, avatar?.avatarImageUrl ?? null),
+                profileImage: resolveMediaUrlForClient(req, user.profileImage ?? null),
                 generatedStates,
                 pendingStates: ACTIVE_AVATAR_STATES.filter((state) => !generatedStates.includes(state)),
                 ready: !!avatar && hasAllStates,
@@ -118,12 +247,17 @@ router.post('/setup', requireAuth, upload.single('photo'), async (req: AuthReque
 
         const { url: avatarUrl, metadata } = await generateBaseAvatar(sourceImage.buffer, sourceImage.mimetype);
         const avatarFingerprint = computeAvatarFingerprint(avatarUrl);
+        const normalizedAvatarStorage = await ensureMediaRefFromValue(
+            avatarUrl,
+            { userId, kind: 'avatar-image' },
+            'avatar-image'
+        ) || avatarUrl;
 
         await Avatar.findOneAndUpdate(
             { userId },
             {
                 userId,
-                avatarImageUrl: avatarUrl,
+                avatarImageUrl: normalizedAvatarStorage,
                 generationMetadata: {
                     ...metadata,
                     avatarFingerprint,
@@ -135,8 +269,8 @@ router.post('/setup', requireAuth, upload.single('photo'), async (req: AuthReque
         );
 
         // Keep visible profile image aligned with generated avatar identity.
-        if (user.profileImage !== avatarUrl) {
-            user.profileImage = avatarUrl;
+        if (user.profileImage !== normalizedAvatarStorage) {
+            user.profileImage = normalizedAvatarStorage;
             await user.save();
         }
 
@@ -176,10 +310,15 @@ router.post('/setup', requireAuth, upload.single('photo'), async (req: AuthReque
         for (const state of ACTIVE_AVATAR_STATES) {
             let candidate: AvatarVideoCandidate;
             try {
-                const animation = await generateStateAnimation(savedAvatar.avatarImageUrl, state);
+                const animation = await generateStateAnimation(avatarUrl, state);
+                const normalizedVideoStorage = await ensureMediaRefFromValue(
+                    animation.url,
+                    { userId, kind: 'avatar-video', stateType: state },
+                    `avatar-video-${state}`
+                ) || animation.url;
                 candidate = {
                     state,
-                    videoUrl: animation.url,
+                    videoUrl: normalizedVideoStorage,
                     duration: animation.duration,
                     quality: animation.quality,
                     loopOptimized: animation.loopOptimized,
@@ -253,14 +392,24 @@ router.post('/setup', requireAuth, upload.single('photo'), async (req: AuthReque
             stateType: { $nin: ACTIVE_AVATAR_STATES },
         });
 
+        await Promise.all([
+            ensureAvatarImageStored(userId, savedAvatar),
+            ensureUserProfileImageStored(userId, user),
+        ]);
+
+        const responseAnimations = generatedAnimations.map((animation) => ({
+            ...animation,
+            videoUrl: resolveMediaUrlForClient(req, animation.videoUrl),
+        }));
+
         sendSuccess(res, {
             avatarId: savedAvatar._id,
-            imageUrl: savedAvatar.avatarImageUrl,
-            profileImage: user.profileImage ?? null,
+            imageUrl: resolveMediaUrlForClient(req, savedAvatar.avatarImageUrl),
+            profileImage: resolveMediaUrlForClient(req, user.profileImage ?? null),
             stylePreset: savedAvatar.generationMetadata?.stylePreset || 'health_twin_demo_style_v1',
             mode: AVATAR_MODE,
             requiredStates: ACTIVE_AVATAR_STATES,
-            animations: generatedAnimations,
+            animations: responseAnimations,
             message: 'Avatar and all emotional loop animations were generated and stored.',
         });
         return;
@@ -288,33 +437,40 @@ router.get('/state', requireAuth, async (req: AuthRequest, res) => {
 
         const { start: todayStartUtc, end: tomorrowStartUtc } = getUtcDayRange(query.date);
 
-        const [avatar, animations, health, mood] = await Promise.all([
-            Avatar.findOne({ userId }),
-            AvatarAnimation.find({ userId, stateType: { $in: ACTIVE_AVATAR_STATES } }),
-            HealthEntry.findOne({ userId, date: { $gte: todayStartUtc, $lt: tomorrowStartUtc } }).sort({ updatedAt: -1, createdAt: -1 }),
-            MoodEntry.findOne({ userId, date: { $gte: todayStartUtc, $lt: tomorrowStartUtc } }).sort({ updatedAt: -1, createdAt: -1 }),
+        const [avatar, animationSignals, health, mood] = await Promise.all([
+            Avatar.findOne({ userId })
+                .select('avatarImageUrl generationMetadata')
+                .lean<{ avatarImageUrl?: string; generationMetadata?: Record<string, unknown> } | null>(),
+            AvatarAnimation.find({ userId, stateType: { $in: ACTIVE_AVATAR_STATES } })
+                .select('stateType generationMetadata')
+                .lean<AnimationStatusSignal[]>(),
+            HealthEntry.findOne({ userId, date: { $gte: todayStartUtc, $lt: tomorrowStartUtc } })
+                .sort({ updatedAt: -1, createdAt: -1 })
+                .lean(),
+            MoodEntry.findOne({ userId, date: { $gte: todayStartUtc, $lt: tomorrowStartUtc } })
+                .sort({ updatedAt: -1, createdAt: -1 })
+                .lean(),
         ]);
 
-        if (!avatar && animations.length === 0) {
+        if (!avatar && animationSignals.length === 0) {
             sendError(res, 404, 'No avatar setup found. Please complete setup.');
             return;
         }
 
-        const avatarFingerprint = avatar?.avatarImageUrl ? computeAvatarFingerprint(avatar.avatarImageUrl) : null;
-        const usableAnimations = animations.filter(anim =>
-            isAvatarBasedAnimation(
-                { videoUrl: anim.videoUrl, generationMetadata: safeMetadata(anim.generationMetadata) },
-                avatarFingerprint
+        await ensureAvatarImageStored(userId, avatar);
+        const avatarFingerprint = resolveAvatarFingerprint(avatar);
+        const generatedStates = Array.from(
+            new Set(
+                animationSignals
+                    .filter(anim => isGeneratedForAvatar(anim.generationMetadata, avatarFingerprint))
+                    .map((anim) => anim.stateType)
             )
         );
-
-        const animMap = usableAnimations.reduce((acc, anim) => {
-            acc[anim.stateType] = anim.videoUrl;
-            return acc;
-        }, {} as Record<StateType, string>);
+        const generatedStateSet = new Set(generatedStates);
 
         const { state: inferredState, reasoning } = chooseAvatarState(health, mood, ACTIVE_AVATAR_STATES);
         const requestedStateRaw = query.state ?? null;
+        const includeMedia = parseIncludeMedia(query.includeMedia);
         const requestedState = requestedStateRaw && ACTIVE_AVATAR_STATES.includes(requestedStateRaw as StateType)
             ? (requestedStateRaw as StateType)
             : null;
@@ -334,30 +490,78 @@ router.get('/state', requireAuth, async (req: AuthRequest, res) => {
             )
         );
 
-        const resolvedState = preferredStates.find((state) => !!animMap[state]) || inferredState;
-        const fallbackVideo =
-            animMap[resolvedState] ||
-            usableAnimations[0]?.videoUrl ||
-            null;
+        let resolvedState = preferredStates.find((state) => generatedStateSet.has(state))
+            || generatedStates[0]
+            || inferredState;
+
+        let fallbackVideo: string | null = null;
+        if (includeMedia && resolvedState && generatedStateSet.has(resolvedState)) {
+            fallbackVideo = readCachedAvatarVideo(userId, resolvedState, avatarFingerprint);
+            if (!fallbackVideo) {
+                const selected = await AvatarAnimation.findOne({ userId, stateType: resolvedState })
+                    .select('videoUrl')
+                    .lean<{ _id?: unknown; videoUrl?: string } | null>();
+                fallbackVideo = await ensureAnimationVideoStored(userId, resolvedState, selected) || null;
+                if (fallbackVideo) {
+                    writeCachedAvatarVideo(userId, resolvedState, fallbackVideo, avatarFingerprint);
+                }
+            }
+        }
+
+        if (includeMedia && !fallbackVideo && generatedStates.length > 0) {
+            for (const state of generatedStates) {
+                const cached = readCachedAvatarVideo(userId, state, avatarFingerprint);
+                if (cached) {
+                    fallbackVideo = cached;
+                    resolvedState = state;
+                    break;
+                }
+            }
+            if (!fallbackVideo) {
+                const fallbackAnim = await AvatarAnimation.findOne({ userId, stateType: { $in: generatedStates } })
+                    .sort({ stateType: 1 })
+                    .select('stateType videoUrl')
+                    .lean<{ _id?: unknown; stateType?: StateType; videoUrl?: string } | null>();
+                if (fallbackAnim?.videoUrl && fallbackAnim.stateType) {
+                    const normalized = await ensureAnimationVideoStored(userId, fallbackAnim.stateType, fallbackAnim);
+                    fallbackVideo = normalized;
+                    if (fallbackAnim.stateType) {
+                        resolvedState = fallbackAnim.stateType;
+                        if (normalized) {
+                            writeCachedAvatarVideo(userId, fallbackAnim.stateType, normalized, avatarFingerprint);
+                        }
+                    }
+                }
+            }
+        }
         const resolvedReasoning = requestedState
             ? `Client preview requested "${requestedState}" state`
             : reasoning;
 
-        if (!fallbackVideo && !avatar?.avatarImageUrl) {
+        if (includeMedia) {
+            if (!fallbackVideo && !avatar?.avatarImageUrl) {
+                sendError(res, 404, 'No avatar media available yet');
+                return;
+            }
+        } else if (generatedStates.length === 0 && !avatar?.avatarImageUrl) {
             sendError(res, 404, 'No avatar media available yet');
             return;
         }
 
+        const compactVideoByState = includeMedia && fallbackVideo
+            ? { [resolvedState]: resolveMediaUrlForClient(req, fallbackVideo) || fallbackVideo } as Record<string, string>
+            : {};
+
         sendSuccess(res, {
             state: resolvedState,
-            videoUrl: fallbackVideo,
-            videoByState: animMap,
-            imageUrl: avatar?.avatarImageUrl ?? null,
+            videoUrl: includeMedia ? (resolveMediaUrlForClient(req, fallbackVideo) || fallbackVideo) : null,
+            videoByState: compactVideoByState,
+            imageUrl: resolveMediaUrlForClient(req, avatar?.avatarImageUrl ?? null),
             avatarFingerprint,
             reasoning: resolvedReasoning,
             mode: AVATAR_MODE,
             requiredStates: ACTIVE_AVATAR_STATES,
-            availableStates: Object.keys(animMap),
+            availableStates: generatedStates,
         });
         return;
     } catch (error) {
@@ -379,19 +583,21 @@ router.get('/status', requireAuth, async (req: AuthRequest, res) => {
             return;
         }
 
-        const [avatar, animations] = await Promise.all([
-            Avatar.findOne({ userId }),
-            AvatarAnimation.find({ userId, stateType: { $in: ACTIVE_AVATAR_STATES } }),
+        const [avatar, animationSignals] = await Promise.all([
+            Avatar.findOne({ userId })
+                .select('avatarImageUrl generationMetadata')
+                .lean<{ _id?: unknown; avatarImageUrl?: string; generationMetadata?: Record<string, unknown> } | null>(),
+            AvatarAnimation.find({ userId, stateType: { $in: ACTIVE_AVATAR_STATES } })
+                .select('stateType generationMetadata')
+                .lean<AnimationStatusSignal[]>(),
         ]);
 
-        const avatarFingerprint = avatar?.avatarImageUrl ? computeAvatarFingerprint(avatar.avatarImageUrl) : null;
+        await ensureAvatarImageStored(userId, avatar);
+        const avatarFingerprint = resolveAvatarFingerprint(avatar);
         const generatedStates = Array.from(
             new Set(
-                animations
-                    .filter(anim => isAvatarBasedAnimation(
-                        { videoUrl: anim.videoUrl, generationMetadata: safeMetadata(anim.generationMetadata) },
-                        avatarFingerprint
-                    ))
+                animationSignals
+                    .filter(anim => isGeneratedForAvatar(anim.generationMetadata, avatarFingerprint))
                     .map((a) => a.stateType)
             )
         );
@@ -399,7 +605,7 @@ router.get('/status', requireAuth, async (req: AuthRequest, res) => {
 
         sendSuccess(res, {
             hasAvatar: !!avatar,
-            avatarUrl: avatar?.avatarImageUrl,
+            avatarUrl: resolveMediaUrlForClient(req, avatar?.avatarImageUrl),
             avatarFingerprint,
             stylePreset: avatar?.generationMetadata?.stylePreset || 'health_twin_demo_style_v1',
             mode: AVATAR_MODE,
@@ -429,8 +635,12 @@ router.get('/library', requireAuth, async (req: AuthRequest, res) => {
         }
 
         const [avatar, animations] = await Promise.all([
-            Avatar.findOne({ userId }),
-            AvatarAnimation.find({ userId, stateType: { $in: ACTIVE_AVATAR_STATES } }),
+            Avatar.findOne({ userId })
+                .select('avatarImageUrl generationMetadata')
+                .lean<{ _id?: unknown; avatarImageUrl?: string; generationMetadata?: Record<string, unknown> } | null>(),
+            AvatarAnimation.find({ userId, stateType: { $in: ACTIVE_AVATAR_STATES } })
+                .select('stateType videoUrl generationMetadata')
+                .lean<Array<{ _id?: unknown; stateType: StateType; videoUrl?: string; generationMetadata?: unknown }>>(),
         ]);
 
         if (!avatar && animations.length === 0) {
@@ -438,25 +648,35 @@ router.get('/library', requireAuth, async (req: AuthRequest, res) => {
             return;
         }
 
-        const avatarFingerprint = avatar?.avatarImageUrl ? computeAvatarFingerprint(avatar.avatarImageUrl) : null;
-        const usableAnimations = animations.filter(anim =>
-            isAvatarBasedAnimation(
-                { videoUrl: anim.videoUrl, generationMetadata: safeMetadata(anim.generationMetadata) },
+        await ensureAvatarImageStored(userId, avatar);
+        const avatarFingerprint = resolveAvatarFingerprint(avatar);
+
+        const usableAnimations: Array<{ stateType: StateType; videoUrl: string }> = [];
+        for (const anim of animations) {
+            const normalizedVideo = await ensureAnimationVideoStored(userId, anim.stateType, anim);
+            if (!normalizedVideo) continue;
+            if (!isAvatarBasedAnimation(
+                { videoUrl: normalizedVideo, generationMetadata: safeMetadata(anim.generationMetadata) },
                 avatarFingerprint
-            )
-        );
+            )) {
+                continue;
+            }
+            writeCachedAvatarVideo(userId, anim.stateType, normalizedVideo, avatarFingerprint);
+            usableAnimations.push({ stateType: anim.stateType, videoUrl: normalizedVideo });
+        }
 
         const videoByState = usableAnimations.reduce((acc, anim) => {
-            acc[anim.stateType] = anim.videoUrl;
+            const resolved = resolveMediaUrlForClient(req, anim.videoUrl) || anim.videoUrl;
+            acc[anim.stateType] = resolved;
             return acc;
         }, {} as Record<StateType, string>);
 
         sendSuccess(res, {
             mode: AVATAR_MODE,
             requiredStates: ACTIVE_AVATAR_STATES,
-            imageUrl: avatar?.avatarImageUrl ?? null,
+            imageUrl: resolveMediaUrlForClient(req, avatar?.avatarImageUrl ?? null),
             videoByState,
-            availableStates: Object.keys(videoByState),
+            availableStates: Object.keys(videoByState) as StateType[],
         });
         return;
     } catch (error) {
