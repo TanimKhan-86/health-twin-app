@@ -2,6 +2,8 @@ import { Router, Response } from 'express';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import HealthEntry from '../models/HealthEntry';
 import MoodEntry from '../models/MoodEntry';
+import { shiftUtcDays, toUtcDayStart } from '../lib/dateUtils';
+import { getErrorMessage, sendError, sendSuccess } from '../lib/apiResponse';
 
 const router = Router();
 router.use(authenticate);
@@ -11,7 +13,11 @@ const MOODS = ['happy', 'energetic', 'neutral', 'tired', 'stressed', 'sad'] as c
 // POST /api/seed/demo  — creates 7 days of backdated health + mood data
 router.post('/demo', async (req: AuthRequest, res: Response): Promise<void> => {
     try {
-        const userId = req.userId!;
+        const userId = req.userId;
+        if (!userId) {
+            sendError(res, 401, 'Unauthorized');
+            return;
+        }
 
         // Clear existing data for this user
         await Promise.all([
@@ -23,9 +29,7 @@ router.post('/demo', async (req: AuthRequest, res: Response): Promise<void> => {
         const moodDocs = [];
 
         for (let i = 6; i >= 0; i--) {
-            const date = new Date();
-            date.setDate(date.getDate() - i);
-            date.setHours(12, 0, 0, 0);
+            const date = shiftUtcDays(toUtcDayStart(), -i);
 
             healthDocs.push({
                 userId,
@@ -53,14 +57,14 @@ router.post('/demo', async (req: AuthRequest, res: Response): Promise<void> => {
             MoodEntry.insertMany(moodDocs),
         ]);
 
-        res.json({
-            message: '✅ 7 days of demo data seeded successfully',
+        sendSuccess(res, {
+            message: '7 days of demo data seeded successfully',
             healthEntries: healthDocs.length,
             moodEntries: moodDocs.length,
         });
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: 'Server error' });
+    } catch (error: unknown) {
+        console.error(error);
+        sendError(res, 500, getErrorMessage(error));
     }
 });
 

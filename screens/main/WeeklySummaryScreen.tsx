@@ -4,17 +4,18 @@ import { ScreenLayout } from "../../components/ScreenLayout";
 import { ArrowLeft, Moon, Zap, TrendingUp, TrendingDown, Minus, Activity } from "lucide-react-native";
 import { DigitalTwinAvatar } from "../../components/DigitalTwinAvatar";
 import { useFocusEffect } from "@react-navigation/native";
-import { getHealthHistory, getMoodHistory } from "../../lib/api/auth";
+import { getHealthHistory, getMoodHistory, HealthEntry as HealthLogEntry, MoodEntry as MoodLogEntry } from "../../lib/api/auth";
 import { LinearGradient } from "expo-linear-gradient";
-
-interface HealthEntry { date: string; steps: number; sleepHours: number; energyScore: number; }
-interface MoodEntry { date: string; mood: string; energyLevel: number; }
+import type { AppScreenProps } from "../../lib/navigation/types";
 
 function avg(arr: number[]) { return arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0; }
+function toTitleCase(value: string): string {
+    return value ? value.charAt(0).toUpperCase() + value.slice(1) : value;
+}
 
-function generateNarrative(health: HealthEntry[]): string {
+function generateNarrative(health: HealthLogEntry[]): string {
     if (!health.length) return "Start logging your health data and I'll generate your personal weekly story here! 📊";
-    const avgEnergy = avg(health.map(e => e.energyScore));
+    const avgEnergy = avg(health.map(e => e.energyScore ?? 0));
     const avgSleep = avg(health.map(e => e.sleepHours));
     const avgSteps = avg(health.map(e => e.steps));
     const energyLabel = avgEnergy >= 75 ? 'excellent' : avgEnergy >= 50 ? 'moderate' : 'low';
@@ -23,37 +24,69 @@ function generateNarrative(health: HealthEntry[]): string {
     return `This week, your digital twin observed ${energyLabel} energy levels averaging ${Math.round(avgEnergy)}/100. You were ${sleepLabel} with ${avgSleep.toFixed(1)} hours of sleep per night, and ${stepsLabel} with an average of ${Math.round(avgSteps).toLocaleString()} steps per day. ${avgEnergy >= 65 ? 'Keep up the great work! 💪' : 'Try logging 30 more minutes of sleep each night — it has the biggest impact on your energy score.'}`;
 }
 
-export default function WeeklySummaryScreen({ navigation }: any) {
+export default function WeeklySummaryScreen({ navigation }: AppScreenProps<'WeeklySummary'>) {
     const [loading, setLoading] = useState(true);
-    const [health, setHealth] = useState<HealthEntry[]>([]);
-    const [moods, setMoods] = useState<MoodEntry[]>([]);
+    const [health, setHealth] = useState<HealthLogEntry[]>([]);
+    const [moods, setMoods] = useState<MoodLogEntry[]>([]);
     useFocusEffect(useCallback(() => { loadSummary(); }, []));
 
     const loadSummary = async () => {
         setLoading(true);
         try {
             const [h, m] = await Promise.all([getHealthHistory(7), getMoodHistory(7)]);
-            setHealth(h as any[]); setMoods(m as any[]);
+            setHealth(h);
+            setMoods(m);
         } catch (e) { console.error("Weekly summary load error", e); }
         finally { setLoading(false); }
     };
 
-    const avgEnergy = Math.round(avg(health.map(e => e.energyScore)));
+    const avgEnergy = Math.round(avg(health.map(e => e.energyScore ?? 0)));
     const avgSleep = avg(health.map(e => e.sleepHours)).toFixed(1);
     const avgSteps = Math.round(avg(health.map(e => e.steps)));
-    const bestDay = health.reduce<HealthEntry | null>((best, e) => !best || e.energyScore > best.energyScore ? e : best, null);
+    const bestDay = health.reduce<HealthLogEntry | null>((best, entry) => {
+        if (!best) return entry;
+        return (entry.energyScore ?? 0) > (best.energyScore ?? 0) ? entry : best;
+    }, null);
 
     const trend: 'improving' | 'declining' | 'stable' = (() => {
         if (health.length < 4) return 'stable';
         const sorted = [...health].sort((a, b) => a.date.localeCompare(b.date));
-        const first = avg(sorted.slice(0, 3).map(e => e.energyScore));
-        const last = avg(sorted.slice(-3).map(e => e.energyScore));
+        const first = avg(sorted.slice(0, 3).map(e => e.energyScore ?? 0));
+        const last = avg(sorted.slice(-3).map(e => e.energyScore ?? 0));
         return last > first + 5 ? 'improving' : last < first - 5 ? 'declining' : 'stable';
     })();
 
     const TrendIcon = trend === 'improving' ? TrendingUp : trend === 'declining' ? TrendingDown : Minus;
     const trendColor = trend === 'improving' ? '#10b981' : trend === 'declining' ? '#ef4444' : '#6b7280';
     const trendBg = trend === 'improving' ? '#ecfdf5' : trend === 'declining' ? '#fef2f2' : '#f3f4f6';
+    const moodCounts = moods.reduce<Record<string, number>>((acc, entry) => {
+        const key = entry.mood || 'unknown';
+        acc[key] = (acc[key] || 0) + 1;
+        return acc;
+    }, {});
+    const moodBreakdown = Object.entries(moodCounts).sort((a, b) => b[1] - a[1]);
+    const dominantMood = moodBreakdown[0]?.[0] ?? null;
+    const dominantMoodPercent = moods.length > 0 && moodBreakdown[0]
+        ? Math.round((moodBreakdown[0][1] / moods.length) * 100)
+        : 0;
+    const avgMoodEnergy = moods.length ? Math.round(avg(moods.map((entry) => entry.energyLevel))) : null;
+    const avgMoodStress = moods.length ? Math.round(avg(moods.map((entry) => entry.stressLevel))) : null;
+    const moodTrend: 'improving' | 'declining' | 'stable' = (() => {
+        if (moods.length < 4) return 'stable';
+        const sorted = [...moods].sort((a, b) => a.date.localeCompare(b.date));
+        const sampleSize = Math.min(3, sorted.length);
+        const firstStress = avg(sorted.slice(0, sampleSize).map((entry) => entry.stressLevel));
+        const lastStress = avg(sorted.slice(-sampleSize).map((entry) => entry.stressLevel));
+        if (lastStress < firstStress - 0.8) return 'improving';
+        if (lastStress > firstStress + 0.8) return 'declining';
+        return 'stable';
+    })();
+    const moodTrendColor = moodTrend === 'improving' ? '#10b981' : moodTrend === 'declining' ? '#ef4444' : '#6b7280';
+    const moodTrendLabel = moodTrend === 'improving'
+        ? 'Stress trend improving'
+        : moodTrend === 'declining'
+            ? 'Stress trend rising'
+            : 'Stress trend stable';
 
     const startDate = (() => { const d = new Date(); d.setDate(d.getDate() - 6); return d.toISOString().slice(5, 10); })();
     const endDate = new Date().toISOString().slice(5, 10);
@@ -123,10 +156,58 @@ export default function WeeklySummaryScreen({ navigation }: any) {
                                                 <Text style={styles.rowTitle}>Peak Performance</Text>
                                                 <Text style={styles.rowSub}>Best day: {bestDay.date}</Text>
                                             </View>
-                                            <Text style={[styles.bigStat, { color: '#f59e0b' }]}>{Math.round(bestDay.energyScore)}</Text>
+                                            <Text style={[styles.bigStat, { color: '#f59e0b' }]}>{Math.round(bestDay.energyScore ?? 0)}</Text>
                                         </View>
                                     </View>
                                 )}
+                            </View>
+                        )}
+
+                        <Text style={styles.sectionLabel}>MOOD SUMMARY</Text>
+                        {moods.length === 0 ? (
+                            <View style={styles.emptyCard}>
+                                <Text style={styles.emptyText}>No mood logs this week. Add your daily mood to unlock mood trends.</Text>
+                            </View>
+                        ) : (
+                            <View style={{ gap: 10 }}>
+                                <View style={styles.card}>
+                                    <View style={styles.row}>
+                                        <View style={[styles.iconWrap, { backgroundColor: '#ede9fe' }]}><Activity size={18} color="#7c3aed" /></View>
+                                        <View style={{ flex: 1 }}>
+                                            <Text style={styles.rowTitle}>Mood Trend</Text>
+                                            <Text style={styles.rowSub}>
+                                                {dominantMood ? `${toTitleCase(dominantMood)} dominated (${dominantMoodPercent}%)` : 'No dominant mood yet'}
+                                            </Text>
+                                        </View>
+                                        <Text style={[styles.bigStat, { color: moodTrendColor, fontSize: 15 }]}>{moodTrendLabel}</Text>
+                                    </View>
+                                </View>
+
+                                <View style={styles.card}>
+                                    <View style={styles.row}>
+                                        <View style={[styles.iconWrap, { backgroundColor: '#fffbeb' }]}><Zap size={18} color="#f59e0b" /></View>
+                                        <View style={{ flex: 1 }}>
+                                            <Text style={styles.rowTitle}>Mood Energy vs Stress</Text>
+                                            <Text style={styles.rowSub}>
+                                                Avg mood energy {avgMoodEnergy ?? '—'}/10 · stress {avgMoodStress ?? '—'}/10
+                                            </Text>
+                                        </View>
+                                        <Text style={[styles.bigStat, { color: '#7c3aed', fontSize: 18 }]}>{moods.length}d</Text>
+                                    </View>
+                                </View>
+
+                                <View style={styles.card}>
+                                    <Text style={styles.rowTitle}>Mood Distribution</Text>
+                                    <View style={styles.moodChipRow}>
+                                        {moodBreakdown.map(([moodName, count]) => (
+                                            <View key={moodName} style={styles.moodChip}>
+                                                <Text style={styles.moodChipText}>
+                                                    {toTitleCase(moodName)} · {Math.round((count / moods.length) * 100)}%
+                                                </Text>
+                                            </View>
+                                        ))}
+                                    </View>
+                                </View>
                             </View>
                         )}
                     </ScrollView>
@@ -156,4 +237,7 @@ const styles = StyleSheet.create({
     bigStat: { fontSize: 22, fontWeight: '800' },
     emptyCard: { backgroundColor: '#fff', borderRadius: 20, padding: 24, alignItems: 'center' },
     emptyText: { color: '#6b7280', textAlign: 'center', lineHeight: 22 },
+    moodChipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 12 },
+    moodChip: { backgroundColor: '#f5f3ff', borderWidth: 1, borderColor: '#e9d5ff', borderRadius: 14, paddingHorizontal: 12, paddingVertical: 8 },
+    moodChipText: { fontSize: 12, fontWeight: '600', color: '#5b21b6' },
 });

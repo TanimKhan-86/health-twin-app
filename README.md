@@ -117,6 +117,10 @@ npx expo start
 | GET | `/api/analytics/summary?days=7` | ✅ | Aggregated stats |
 | GET | `/api/achievements` | ✅ | Badges/gamification |
 | POST | `/api/seed/demo` | ✅ | Seed 7 days of demo data |
+| POST | `/api/avatar/setup` | ✅ | Avatar setup endpoint (generation in `nanobana` mode, no-op readiness in `prebuilt` mode) |
+| GET | `/api/avatar/status` | ✅ | Avatar readiness + generated state list |
+| GET | `/api/avatar/state` | ✅ | Return one dynamic looping animation for dashboard |
+| GET | `/api/future/insight?days=7` | ✅ | Analyze last 7 days and project next-week dominant state + matching avatar media |
 
 All protected routes require: `Authorization: Bearer <token>`
 
@@ -130,3 +134,54 @@ All protected routes require: `Authorization: Bearer <token>`
 | Backend | Node.js, Express, TypeScript |
 | Database | MongoDB Atlas (Mongoose) |
 | Auth | JWT (30-day tokens) |
+
+---
+
+## 🎭 Avatar System (Prebuilt + NanoBana)
+
+The app supports 2 modes via `server/.env`:
+
+1. `AVATAR_MODE=prebuilt` (recommended for prototype/cost control)
+2. `AVATAR_MODE=nanobana` (live Gemini/Veo generation)
+
+### Prebuilt mode flow (no Gemini usage for avatar generation)
+
+1. Keep `AVATAR_MODE=prebuilt` in `server/.env`
+2. Seed pre-generated assets (avatar PNG + `happy/sad/sleepy` MP4 loops) into MongoDB
+3. Dashboard fetches `/api/avatar/state` and loops exactly one state video in the circular frame
+4. State selection updates from daily vitals and mood metrics
+
+Use the seed importer:
+
+```bash
+cd server
+cp scripts/prebuilt-avatar-seed.example.json scripts/prebuilt-avatar-seed.json
+# edit paths/emails in scripts/prebuilt-avatar-seed.json
+npm run seed:avatars:prebuilt -- --config ./scripts/prebuilt-avatar-seed.json
+```
+
+### NanoBana mode flow (live generation)
+
+1. User uploads a real selfie during profile creation
+2. Selfie is saved in MongoDB (`User.profileImage`)
+3. Backend generates stylized avatar image
+4. Avatar image is saved in MongoDB (`Avatar`) and synced for top-right/settings display
+5. Avatar is used to generate emotional loops and save them in MongoDB (`AvatarAnimation`)
+6. Dashboard requests `/api/avatar/state` to play one looping animation
+
+### Backend env vars
+
+Add these to `server/.env`:
+
+```bash
+AVATAR_MODE=prebuilt # prebuilt or nanobana
+
+# Google AI Studio key (Gemini image + Veo video)
+NANO_BANA_API_KEY=your_google_ai_studio_api_key_here
+NANO_BANA_STYLE_PRESET=health_twin_demo_style_v1
+NANO_BANA_VIDEO_MODEL=veo-2.0-generate-001
+# Optional style demo avatar reference as data URI (used to keep style consistent)
+NANO_BANA_STYLE_REFERENCE_DATA_URI=
+```
+
+If `AVATAR_MODE=prebuilt`, avatar generation endpoints do not call Gemini/Veo.

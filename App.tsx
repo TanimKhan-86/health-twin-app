@@ -6,6 +6,7 @@ import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
+import type { RootStackParamList } from './lib/navigation/types';
 
 // Auth
 import { AuthProvider, useAuth } from './contexts/AuthContext';
@@ -15,8 +16,8 @@ import SignInScreen from './screens/auth/SignInScreen';
 import SignUpScreen from './screens/auth/SignUpScreen';
 import DailyLogScreen from './screens/main/DailyLogScreen';
 import DashboardScreen from './screens/main/DashboardScreen';
-import DataEntryScreen from './screens/main/DataEntryScreen';
 import WhatIfScreen from './screens/main/WhatIfScreen';
+import FutureYouScreen from './screens/main/FutureYouScreen';
 import AchievementsScreen from './screens/main/AchievementsScreen';
 import WeeklySummaryScreen from './screens/main/WeeklySummaryScreen';
 import AIWeeklyAnalysisScreen from './screens/main/AIWeeklyAnalysisScreen';
@@ -27,7 +28,7 @@ import DatabaseViewerScreen from './screens/dev/DatabaseViewerScreen';
 import { ToastProvider } from './components/ui/Toast';
 import { ActivityIndicator, View, Text } from 'react-native';
 
-const Stack = createNativeStackNavigator();
+const Stack = createNativeStackNavigator<RootStackParamList>();
 
 // ─── Auth Navigator: Sign In / Sign Up ────────────────────────────────────────
 function AuthNavigator() {
@@ -45,7 +46,9 @@ function AppNavigator() {
     <Stack.Navigator screenOptions={{ headerShown: false }}>
       <Stack.Screen name="Main" component={DashboardScreen} />
       <Stack.Screen name="DailyLog" component={DailyLogScreen} />
-      <Stack.Screen name="DataEntry" component={DataEntryScreen} />
+      {/* Backward-compatible alias while keeping one canonical daily logging flow */}
+      <Stack.Screen name="DataEntry" component={DailyLogScreen} />
+      <Stack.Screen name="FutureYou" component={FutureYouScreen} />
       <Stack.Screen name="WhatIf" component={WhatIfScreen} />
       <Stack.Screen name="Achievements" component={AchievementsScreen} />
       <Stack.Screen name="WeeklySummary" component={WeeklySummaryScreen} />

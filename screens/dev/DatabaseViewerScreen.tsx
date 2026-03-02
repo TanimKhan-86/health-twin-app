@@ -3,6 +3,7 @@ import { View, Text, TouchableOpacity, ScrollView } from 'react-native';
 import { ScreenLayout } from '../../components/ScreenLayout';
 import { ArrowLeft, Database } from 'lucide-react-native';
 import { Card, CardContent } from '../../components/ui/Card';
+import type { AppScreenProps } from '../../lib/navigation/types';
 
 /**
  * DatabaseViewerScreen — previously showed SQLite data.
@@ -10,7 +11,7 @@ import { Card, CardContent } from '../../components/ui/Card';
  * This screen now shows a notice and could be extended to show
  * the user's MongoDB data via the API.
  */
-export default function DatabaseViewerScreen({ navigation }: any) {
+export default function DatabaseViewerScreen({ navigation }: AppScreenProps<'DatabaseViewer'>) {
     return (
         <ScreenLayout gradientBackground>
             <View className="flex-1">
@@ -23,8 +24,8 @@ export default function DatabaseViewerScreen({ navigation }: any) {
                         <Text className="text-white font-bold ml-2">Back</Text>
                     </TouchableOpacity>
                     <View>
-                        <Text className="text-white text-xl font-bold">Database</Text>
-                        <Text className="text-teal-200 text-xs">Storage info</Text>
+                        <Text className="text-white text-xl font-bold">Database Info</Text>
+                        <Text className="text-teal-200 text-xs">Read-only storage overview</Text>
                     </View>
                 </View>
 
@@ -48,7 +49,7 @@ export default function DatabaseViewerScreen({ navigation }: any) {
                                 ))}
                             </View>
                             <Text className="text-slate-400 text-xs mt-4 text-center">
-                                Use the Analytics screen to view your stored health data.
+                                This screen is informational only. Use Analytics, Daily Log, and Future You for live user data.
                             </Text>
                         </CardContent>
                     </Card>

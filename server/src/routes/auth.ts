@@ -1,105 +1,172 @@
-import { Router, Request, Response } from 'express';
+import { Router, Response } from 'express';
 import jwt from 'jsonwebtoken';
+import { z } from 'zod';
+import { authenticate, AuthRequest } from '../middleware/auth';
 import User from '../models/User';
+import HealthEntry from '../models/HealthEntry';
+import MoodEntry from '../models/MoodEntry';
+import { Avatar } from '../models/Avatar';
+import { AvatarAnimation } from '../models/AvatarAnimation';
+import WeeklyAnalysisCache from '../models/WeeklyAnalysisCache';
+import { AuthSessionDto, AuthUserDto } from '../contracts/api';
+import { getErrorMessage, sendError, sendSuccess } from '../lib/apiResponse';
+import { parseBody } from '../lib/validation';
 
 const router = Router();
 
+const registerSchema = z.object({
+    name: z.string().trim().min(1, 'Name is required').max(100, 'Name is too long'),
+    email: z.string().trim().email('Invalid email format').transform((value) => value.toLowerCase()),
+    password: z.string().min(6, 'Password must be at least 6 characters'),
+    profileImage: z.string().trim().min(1).optional(),
+    age: z.coerce.number().int().min(1).max(120).optional(),
+    heightCm: z.coerce.number().min(40).max(250).optional(),
+    weightKg: z.coerce.number().min(20).max(400).optional(),
+});
+
+const loginSchema = z.object({
+    email: z.string().trim().email('Invalid email format').transform((value) => value.toLowerCase()),
+    password: z.string().min(1, 'Password is required'),
+});
+
+function toAuthUser(user: {
+    _id: unknown;
+    name: string;
+    email: string;
+    age?: number;
+    heightCm?: number;
+    weightKg?: number;
+    profileImage?: string | null;
+}): AuthUserDto {
+    return {
+        id: String(user._id),
+        name: user.name,
+        email: user.email,
+        age: user.age,
+        heightCm: user.heightCm,
+        weightKg: user.weightKg,
+        profileImage: user.profileImage ?? null,
+    };
+}
+
+function createAuthToken(userId: string): string | null {
+    const secret = process.env.JWT_SECRET;
+    if (!secret) return null;
+    return jwt.sign({ userId }, secret, { expiresIn: '30d' });
+}
+
 // POST /api/auth/register
-router.post('/register', async (req: Request, res: Response): Promise<void> => {
+router.post('/register', async (req, res: Response): Promise<void> => {
+    const input = parseBody(res, registerSchema, req.body);
+    if (!input) return;
+
     try {
-        const { name, email, password, profileImage, age, heightCm, weightKg } = req.body;
-        console.log(`[Register] Request for ${email}. profileImage present?`, !!profileImage, typeof profileImage);
-        if (profileImage) {
-            console.log(`[Register] profileImage length:`, profileImage.length, `Starts with:`, profileImage.substring(0, 30));
-        }
-
-        if (!name || !email || !password) {
-            res.status(400).json({ error: 'name, email and password are required' });
-            return;
-        }
-
-        const existing = await User.findOne({ email });
+        const existing = await User.findOne({ email: input.email });
         if (existing) {
-            res.status(409).json({ error: 'Email already registered' });
+            sendError(res, 409, 'Email already registered');
             return;
         }
 
-        const user = await User.create({ name, email, password, profileImage, age, heightCm, weightKg });
+        const user = await User.create(input);
+        const token = createAuthToken(String(user._id));
+        if (!token) {
+            sendError(res, 500, 'JWT secret is not configured');
+            return;
+        }
 
-        const token = jwt.sign(
-            { userId: user._id },
-            process.env.JWT_SECRET as string,
-            { expiresIn: '30d' }
-        );
-
-        res.status(201).json({
+        const payload: AuthSessionDto = {
             token,
-            user: { id: user._id, name: user.name, email: user.email, profileImage: user.profileImage },
-        });
-    } catch (err) {
-        console.error('Register error:', err);
-        res.status(500).json({ error: 'Server error' });
+            user: toAuthUser(user),
+        };
+        sendSuccess(res, payload, 201);
+    } catch (error: unknown) {
+        console.error('Register error:', error);
+        sendError(res, 500, getErrorMessage(error));
     }
 });
 
 // POST /api/auth/login
-router.post('/login', async (req: Request, res: Response): Promise<void> => {
+router.post('/login', async (req, res: Response): Promise<void> => {
+    const input = parseBody(res, loginSchema, req.body);
+    if (!input) return;
+
     try {
-        const { email, password } = req.body;
-        if (!email || !password) {
-            res.status(400).json({ error: 'email and password are required' });
-            return;
-        }
-
-        const user = await User.findOne({ email });
-        console.log(`[Login] findOne result for ${email}:`, user ? 'FOUND' : 'null');
-        console.log(`[Login] Raw password input length: ${password.length}`);
-
+        const user = await User.findOne({ email: input.email });
         if (!user) {
-            console.warn(`[Login] Failed: Email ${email} not found`);
-            res.status(401).json({ error: 'Invalid credentials' });
+            sendError(res, 401, 'Invalid credentials');
             return;
         }
 
-        console.log(`[Login] Comparing password for ${email}. Hash length: ${user.password?.length}`);
-        const valid = await user.comparePassword(password);
+        const valid = await user.comparePassword(input.password);
         if (!valid) {
-            console.warn(`[Login] Failed: Invalid password for ${email}`);
-            res.status(401).json({ error: 'Invalid credentials' });
+            sendError(res, 401, 'Invalid credentials');
             return;
         }
 
-        const token = jwt.sign(
-            { userId: user._id },
-            process.env.JWT_SECRET as string,
-            { expiresIn: '30d' }
-        );
+        const token = createAuthToken(String(user._id));
+        if (!token) {
+            sendError(res, 500, 'JWT secret is not configured');
+            return;
+        }
 
-        res.json({
+        const payload: AuthSessionDto = {
             token,
-            user: { id: user._id, name: user.name, email: user.email, profileImage: user.profileImage },
-        });
-    } catch (err) {
-        console.error('Login error:', err);
-        res.status(500).json({ error: 'Server error' });
+            user: toAuthUser(user),
+        };
+        sendSuccess(res, payload);
+    } catch (error: unknown) {
+        console.error('Login error:', error);
+        sendError(res, 500, getErrorMessage(error));
     }
 });
 
 // GET /api/auth/me
-router.get('/me', async (req: Request, res: Response): Promise<void> => {
+router.get('/me', authenticate, async (req: AuthRequest, res: Response): Promise<void> => {
     try {
-        const authHeader = req.headers.authorization;
-        if (!authHeader?.startsWith('Bearer ')) {
-            res.status(401).json({ error: 'Unauthorized' });
+        if (!req.userId) {
+            sendError(res, 401, 'Unauthorized');
             return;
         }
-        const token = authHeader.split(' ')[1];
-        const decoded = jwt.verify(token, process.env.JWT_SECRET as string) as { userId: string };
-        const user = await User.findById(decoded.userId).select('-password');
-        if (!user) { res.status(404).json({ error: 'User not found' }); return; }
-        res.json({ user: { id: user._id, name: user.name, email: user.email, profileImage: user.profileImage } });
-    } catch {
-        res.status(401).json({ error: 'Unauthorized' });
+
+        const user = await User.findById(req.userId).select('-password');
+        if (!user) {
+            sendError(res, 404, 'User not found');
+            return;
+        }
+
+        sendSuccess(res, { user: toAuthUser(user) });
+    } catch (error: unknown) {
+        sendError(res, 500, getErrorMessage(error));
+    }
+});
+
+// DELETE /api/auth/me
+router.delete('/me', authenticate, async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        if (!req.userId) {
+            sendError(res, 401, 'Unauthorized');
+            return;
+        }
+
+        const userId = req.userId;
+        const deletedUser = await User.findByIdAndDelete(userId);
+        if (!deletedUser) {
+            sendError(res, 404, 'User not found');
+            return;
+        }
+
+        await Promise.all([
+            HealthEntry.deleteMany({ userId }),
+            MoodEntry.deleteMany({ userId }),
+            Avatar.deleteMany({ userId }),
+            AvatarAnimation.deleteMany({ userId }),
+            WeeklyAnalysisCache.deleteMany({ userId }),
+        ]);
+
+        sendSuccess(res, { message: 'Account and associated data deleted successfully' });
+    } catch (error: unknown) {
+        console.error('Delete account error:', error);
+        sendError(res, 500, getErrorMessage(error));
     }
 });
 

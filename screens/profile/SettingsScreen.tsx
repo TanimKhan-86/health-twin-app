@@ -1,11 +1,16 @@
 import React, { useState } from "react";
 import { View, Text, TouchableOpacity, ScrollView, Alert, Switch, Share, Platform, Image, StyleSheet } from "react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { ScreenLayout } from "../../components/ScreenLayout";
 import { useToast } from "../../components/ui/Toast";
-import { User, Bell, Download, Trash2, LogOut, ChevronRight, Shield, Database, ArrowLeft } from "lucide-react-native";
+import { User, Bell, Download, Trash2, LogOut, ChevronRight, Shield, Database } from "lucide-react-native";
 import { useAuth } from "../../contexts/AuthContext";
-import { seedDemoWeek } from "../../lib/api/auth";
-import { LinearGradient } from "expo-linear-gradient";
+import { deleteMyAccount, seedDemoWeek } from "../../lib/api/auth";
+import { apiFetch } from "../../lib/api/client";
+import type { AppScreenProps } from "../../lib/navigation/types";
+import { PageHeader } from "../../components/ui/PageHeader";
+import { SectionCard } from "../../components/ui/SectionCard";
+import { AppButton } from "../../components/ui/AppButton";
 
 function SettingRow({ icon, iconBg, label, sub, onPress, isDestructive, rightEl }: {
     icon: React.ReactNode; iconBg: string; label: string; sub?: string;
@@ -23,13 +28,49 @@ function SettingRow({ icon, iconBg, label, sub, onPress, isDestructive, rightEl 
     );
 }
 
-export default function SettingsScreen({ navigation }: any) {
+export default function SettingsScreen({ navigation }: AppScreenProps<'Settings'>) {
     const { user, logout } = useAuth();
     const { showToast } = useToast();
     const [isSeeding, setIsSeeding] = useState(false);
+    const [isDeletingAccount, setIsDeletingAccount] = useState(false);
     const [notifications, setNotifications] = useState(true);
+    const [profileAvatarUrl, setProfileAvatarUrl] = useState<string | null>(user?.profileImage ?? null);
 
     const initials = user?.name ? user.name.split(' ').map((n: string) => n[0]).join('').toUpperCase().slice(0, 2) : '?';
+    const notificationsStorageKey = user?.id ? `healthtwin_notifications_enabled:${user.id}` : null;
+
+    React.useEffect(() => {
+        let isMounted = true;
+        apiFetch<{ hasAvatar: boolean; avatarUrl?: string }>('/api/avatar/status').then((res) => {
+            if (!isMounted) return;
+            setProfileAvatarUrl((res.success ? res.data?.avatarUrl ?? null : null) ?? user?.profileImage ?? null);
+        });
+        return () => { isMounted = false; };
+    }, [user?.profileImage]);
+
+    React.useEffect(() => {
+        if (!notificationsStorageKey) return;
+        let cancelled = false;
+        AsyncStorage.getItem(notificationsStorageKey).then((storedValue) => {
+            if (cancelled || storedValue === null) return;
+            setNotifications(storedValue === '1');
+        }).catch((error) => {
+            console.warn('Failed to load notification preference:', error);
+        });
+        return () => { cancelled = true; };
+    }, [notificationsStorageKey]);
+
+    const handleNotificationsToggle = async (nextValue: boolean) => {
+        setNotifications(nextValue);
+        if (notificationsStorageKey) {
+            try {
+                await AsyncStorage.setItem(notificationsStorageKey, nextValue ? '1' : '0');
+            } catch (error) {
+                console.warn('Failed to persist notification preference:', error);
+            }
+        }
+        showToast(nextValue ? 'Notifications on' : 'Notifications off', nextValue ? 'success' : 'info');
+    };
 
     const handleLogout = () => {
         if (Platform.OS === 'web') {
@@ -57,25 +98,48 @@ export default function SettingsScreen({ navigation }: any) {
         await Share.share({ message: JSON.stringify({ user: { name: user?.name, email: user?.email }, exportedAt: new Date().toISOString() }, null, 2), title: 'HealthTwin Export' });
     };
 
+    const handleDeleteAccount = () => {
+        Alert.alert("Delete Account", "Permanently delete your profile and all synced data?", [
+            { text: "Cancel", style: "cancel" },
+            {
+                text: "Delete",
+                style: "destructive",
+                onPress: async () => {
+                    if (isDeletingAccount) return;
+                    setIsDeletingAccount(true);
+                    try {
+                        const ok = await deleteMyAccount();
+                        if (!ok) {
+                            showToast('Failed to delete account', 'error');
+                            return;
+                        }
+                        await logout();
+                        showToast('Account deleted permanently', 'success');
+                    } catch {
+                        showToast('Failed to delete account', 'error');
+                    } finally {
+                        setIsDeletingAccount(false);
+                    }
+                }
+            }
+        ]);
+    };
+
     return (
         <ScreenLayout gradientBackground>
-            {/* Gradient Header */}
-            <LinearGradient colors={["#7c3aed", "#6d28d9"]} style={styles.headerGrad}>
-                <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-                    <ArrowLeft color="white" size={18} />
-                    <Text style={styles.backText}>Back</Text>
-                </TouchableOpacity>
-                <Text style={styles.headerTitle}>Settings</Text>
-                <Text style={styles.headerSub}>Manage your preferences</Text>
-            </LinearGradient>
+            <PageHeader
+                title="Settings"
+                subtitle="Manage your preferences"
+                onBack={() => navigation.goBack()}
+            />
 
             <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
 
                 {/* Profile Card */}
-                <View style={styles.profileCard}>
+                <SectionCard style={styles.profileCard}>
                     <View style={styles.profileAvatar}>
-                        {user?.profileImage
-                            ? <Image source={{ uri: user.profileImage }} style={{ width: 64, height: 64, borderRadius: 32 }} />
+                        {profileAvatarUrl
+                            ? <Image source={{ uri: profileAvatarUrl }} style={{ width: 64, height: 64, borderRadius: 32 }} />
                             : <Text style={styles.avatarInitials}>{initials}</Text>}
                     </View>
                     <View>
@@ -83,25 +147,25 @@ export default function SettingsScreen({ navigation }: any) {
                         <Text style={styles.profileEmail}>{user?.email ?? '—'}</Text>
                         {user?.age && <Text style={styles.profileMeta}>{user.age}y · {user.heightCm}cm · {user.weightKg}kg</Text>}
                     </View>
-                </View>
+                </SectionCard>
 
                 <Text style={styles.sectionLabel}>ACCOUNT</Text>
-                <View style={styles.section}>
+                <SectionCard style={styles.section}>
                     <SettingRow icon={<User size={18} color="#7c3aed" />} iconBg="#f5f3ff" label="Account ID" sub={user?.id ? `${user.id.substring(0, 16)}...` : '—'} />
                     <View style={styles.divider} />
                     <SettingRow icon={<Shield size={18} color="#6366f1" />} iconBg="#eef2ff" label="Email" sub={user?.email ?? '—'} />
-                </View>
+                </SectionCard>
 
                 <Text style={styles.sectionLabel}>PREFERENCES</Text>
-                <View style={styles.section}>
+                <SectionCard style={styles.section}>
                     <SettingRow
                         icon={<Bell size={18} color="#f59e0b" />} iconBg="#fffbeb" label="Push Notifications"
-                        rightEl={<Switch value={notifications} onValueChange={v => { setNotifications(v); showToast(v ? 'Notifications on' : 'Notifications off', v ? 'success' : 'info'); }} trackColor={{ false: '#e5e7eb', true: '#7c3aed' }} thumbColor="#fff" />}
+                        rightEl={<Switch value={notifications} onValueChange={handleNotificationsToggle} trackColor={{ false: '#e5e7eb', true: '#7c3aed' }} thumbColor="#fff" />}
                     />
-                </View>
+                </SectionCard>
 
                 <Text style={styles.sectionLabel}>DATA & DEMO</Text>
-                <View style={styles.section}>
+                <SectionCard style={styles.section}>
                     <SettingRow icon={<User size={18} color="#0ea5e9" />} iconBg="#e0f2fe"
                         label="Digital Twin Setup" sub="Create your NanoBana avatar"
                         onPress={() => navigation.navigate("AvatarSetup")} />
@@ -114,26 +178,26 @@ export default function SettingsScreen({ navigation }: any) {
                         label="Export Data (JSON)" sub="Share your health records" onPress={handleExport} />
                     <View style={styles.divider} />
                     <SettingRow icon={<Database size={18} color="#8b5cf6" />} iconBg="#f5f3ff"
-                        label="Database Viewer" sub="Debug view" onPress={() => navigation.navigate("DatabaseViewer")} />
-                </View>
+                        label="Database Info (Read-only)" sub="Storage overview for prototype" onPress={() => navigation.navigate("DatabaseViewer")} />
+                </SectionCard>
 
                 <Text style={styles.sectionLabel}>DANGER ZONE</Text>
-                <View style={styles.section}>
+                <SectionCard style={styles.section}>
                     <SettingRow icon={<Trash2 size={18} color="#ef4444" />} iconBg="#fef2f2"
-                        label="Delete Account" isDestructive sub="This cannot be undone"
-                        onPress={() => Alert.alert("Delete Account", "Permanently delete your profile?", [
-                            { text: "Cancel", style: "cancel" },
-                            { text: "Delete", style: "destructive", onPress: async () => { await logout(); showToast('Account deleted', 'info'); } }
-                        ])} />
-                </View>
+                        label={isDeletingAccount ? "Deleting Account..." : "Delete Account"}
+                        isDestructive
+                        sub="This cannot be undone"
+                        onPress={isDeletingAccount ? undefined : handleDeleteAccount}
+                    />
+                </SectionCard>
 
                 {/* Sign Out */}
-                <TouchableOpacity onPress={handleLogout} activeOpacity={0.85}>
-                    <LinearGradient colors={["#ef4444", "#dc2626"]} style={styles.logoutBtn}>
-                        <LogOut size={18} color="white" />
-                        <Text style={styles.logoutText}>Sign Out</Text>
-                    </LinearGradient>
-                </TouchableOpacity>
+                <AppButton
+                    label="Sign Out"
+                    onPress={handleLogout}
+                    variant="danger"
+                    icon={<LogOut size={16} color="#e14b61" />}
+                />
 
                 <Text style={styles.footer}>HealthTwin AI v1.0.0 · MongoDB Atlas</Text>
             </ScrollView>
@@ -142,15 +206,9 @@ export default function SettingsScreen({ navigation }: any) {
 }
 
 const styles = StyleSheet.create({
-    headerGrad: { paddingHorizontal: 20, paddingTop: 10, paddingBottom: 28 },
-    backBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(255,255,255,0.2)', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, alignSelf: 'flex-start', marginBottom: 16 },
-    backText: { color: '#fff', fontWeight: '700' },
-    headerTitle: { fontSize: 24, fontWeight: '800', color: '#fff' },
-    headerSub: { fontSize: 13, color: 'rgba(255,255,255,0.75)', marginTop: 4 },
-
     scroll: { padding: 16, paddingTop: 8, paddingBottom: 60 },
 
-    profileCard: { flexDirection: 'row', alignItems: 'center', gap: 16, backgroundColor: '#fff', borderRadius: 20, padding: 20, marginBottom: 20, shadowColor: '#7c3aed', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.08, shadowRadius: 12, elevation: 3 },
+    profileCard: { flexDirection: 'row', alignItems: 'center', gap: 16, marginBottom: 20 },
     profileAvatar: { width: 64, height: 64, borderRadius: 32, backgroundColor: '#7c3aed', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', borderWidth: 2, borderColor: '#e9d5ff' },
     avatarInitials: { color: '#fff', fontWeight: '800', fontSize: 22 },
     profileName: { fontSize: 17, fontWeight: '800', color: '#1e1b4b' },
@@ -158,14 +216,11 @@ const styles = StyleSheet.create({
     profileMeta: { fontSize: 11, color: '#9ca3af', marginTop: 4 },
 
     sectionLabel: { fontSize: 11, fontWeight: '700', color: '#7c3aed', marginLeft: 4, marginBottom: 8, marginTop: 8, letterSpacing: 0.8 },
-    section: { backgroundColor: '#fff', borderRadius: 20, marginBottom: 12, overflow: 'hidden', shadowColor: '#7c3aed', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 10, elevation: 2 },
+    section: { marginBottom: 12, overflow: 'hidden', padding: 0 },
     row: { flexDirection: 'row', alignItems: 'center', gap: 14, padding: 16 },
     rowIcon: { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
     rowLabel: { fontSize: 15, fontWeight: '600', color: '#1e1b4b' },
     rowSub: { fontSize: 12, color: '#9ca3af', marginTop: 2 },
     divider: { height: 1, backgroundColor: '#f3f4f6', marginLeft: 70 },
-
-    logoutBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, borderRadius: 18, paddingVertical: 16, marginTop: 8, shadowColor: '#ef4444', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.25, shadowRadius: 10, elevation: 4 },
-    logoutText: { color: '#fff', fontWeight: '700', fontSize: 16 },
     footer: { textAlign: 'center', color: '#9ca3af', fontSize: 11, marginTop: 24 },
 });

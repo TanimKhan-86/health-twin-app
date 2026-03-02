@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
+import { sendError } from '../lib/apiResponse';
 
 export interface AuthRequest extends Request {
     userId?: string;
@@ -12,7 +13,7 @@ export const authenticate = (
 ): void => {
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
-        res.status(401).json({ error: 'Unauthorized — no token provided' });
+        sendError(res, 401, 'Unauthorized — no token provided');
         return;
     }
 
@@ -22,6 +23,6 @@ export const authenticate = (
         req.userId = decoded.userId;
         next();
     } catch {
-        res.status(401).json({ error: 'Unauthorized — invalid token' });
+        sendError(res, 401, 'Unauthorized — invalid token');
     }
 };

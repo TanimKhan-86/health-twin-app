@@ -1,11 +1,74 @@
 import { Router, Response } from 'express';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { z } from 'zod';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import WeeklyAnalysisCache from '../models/WeeklyAnalysisCache';
-import { generateWellnessAnalysis } from '../lib/wellnessEngine';
+import { generateWellnessAnalysis, WellnessAnalysis } from '../lib/wellnessEngine';
+import { sendError, sendSuccess } from '../lib/apiResponse';
+import { parseBody } from '../lib/validation';
 
 const router = Router();
 router.use(authenticate);
+
+const healthDataPointSchema = z.object({
+    steps: z.coerce.number().min(0).optional(),
+    sleepHours: z.coerce.number().min(0).max(24).optional(),
+    waterLitres: z.coerce.number().min(0).max(20).optional(),
+    heartRate: z.coerce.number().min(0).max(260).optional(),
+    energyScore: z.coerce.number().min(0).max(100).optional(),
+    date: z.union([z.string(), z.date()]).optional(),
+});
+
+const moodDataPointSchema = z.object({
+    mood: z.string().trim().min(1).optional(),
+    energyLevel: z.coerce.number().min(1).max(10).optional(),
+    stressLevel: z.coerce.number().min(1).max(10).optional(),
+    date: z.union([z.string(), z.date()]).optional(),
+});
+
+const weeklyAnalysisRequestSchema = z.object({
+    healthData: z.array(healthDataPointSchema).min(1, 'No health data provided. Please log some data first.'),
+    moodData: z.array(moodDataPointSchema).default([]),
+});
+
+type WeeklyAnalysisRequest = z.infer<typeof weeklyAnalysisRequestSchema>;
+
+interface LlmAnalysisPayload {
+    narrative?: string;
+    tips?: string[];
+    predictedOutcome?: string;
+    disclaimer?: string;
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function normalizeParsedResponse(value: unknown): WellnessAnalysis {
+    if (isObject(value)) {
+        const narrative = typeof value.narrative === 'string' && value.narrative.trim().length > 0
+            ? value.narrative
+            : 'You logged data this week and showed consistency. Keep tracking daily to strengthen your Digital Twin insights.';
+        const tips = Array.isArray(value.tips)
+            ? value.tips.filter((item): item is string => typeof item === 'string')
+            : ['Log your health data daily for more personalised tips.'];
+        const predictedOutcome = typeof value.predictedOutcome === 'string' && value.predictedOutcome.trim().length > 0
+            ? value.predictedOutcome
+            : 'With consistent tracking, you will start seeing meaningful patterns in your health.';
+        const disclaimer = typeof value.disclaimer === 'string' && value.disclaimer.trim().length > 0
+            ? value.disclaimer
+            : '⚠️ This is general wellness guidance only and is not medical advice. Please consult a healthcare professional for medical concerns.';
+
+        return { narrative, tips, predictedOutcome, disclaimer };
+    }
+
+    return {
+        narrative: 'Your data could not be parsed into a full AI summary.',
+        tips: ['Log your health data daily for more personalised tips.'],
+        predictedOutcome: 'With consistent tracking, you will start seeing meaningful patterns in your health.',
+        disclaimer: '⚠️ This is general wellness guidance only and is not medical advice. Please consult a healthcare professional for medical concerns.',
+    };
+}
 
 // Returns "YYYY-WW" — year + ISO week number
 function getWeekKey(date: Date = new Date()): string {
@@ -31,61 +94,62 @@ STRICT RULES — follow these without exception:
 8. Keep the total response concise and practical`;
 
 router.post('/weekly-analysis', async (req: AuthRequest, res: Response): Promise<void> => {
+    const input = parseBody(res, weeklyAnalysisRequestSchema, req.body);
+    if (!input) return;
+
+    const userId = req.userId;
+    if (!userId) {
+        sendError(res, 401, 'Unauthorized');
+        return;
+    }
+
+    const weekKey = getWeekKey();
+
     try {
-        const apiKey = process.env.GEMINI_API_KEY;
-        if (!apiKey) {
-            res.status(500).json({ success: false, error: 'Gemini API key not configured' });
-            return;
-        }
-
-        const { healthData, moodData } = req.body;
-
-        if (!healthData || healthData.length === 0) {
-            res.status(400).json({ success: false, error: 'No health data provided. Please log some data first.' });
-            return;
-        }
-
-        const userId = req.userId!;
-        const weekKey = getWeekKey();
-
-        // ── 1. Check cache — return instantly if already generated this week ──────
         const cached = await WeeklyAnalysisCache.findOne({ userId, weekKey });
         if (cached) {
-            console.log(`[AI] Cache HIT for user ${userId} week ${weekKey}`);
-            res.json({
-                success: true,
-                data: {
-                    narrative: cached.narrative,
-                    tips: cached.tips,
-                    predictedOutcome: cached.predictedOutcome,
-                    disclaimer: cached.disclaimer,
-                    fromCache: true,
-                    cacheWeek: weekKey,
-                },
+            sendSuccess(res, {
+                narrative: cached.narrative,
+                tips: cached.tips,
+                predictedOutcome: cached.predictedOutcome,
+                disclaimer: cached.disclaimer,
+                fromCache: true,
+                cacheWeek: weekKey,
+                generatedAt: cached.createdAt.toISOString(),
             });
             return;
         }
 
-        // ── 2. Cache MISS — call Gemini ───────────────────────────────────────────
-        console.log(`[AI] Cache MISS for user ${userId} week ${weekKey} — calling Gemini`);
+        const apiKey = process.env.GEMINI_API_KEY;
+        if (!apiKey) {
+            throw new Error('Gemini API key not configured');
+        }
 
-        const avgSteps = Math.round(healthData.reduce((s: number, e: any) => s + (e.steps || 0), 0) / healthData.length);
-        const avgSleep = (healthData.reduce((s: number, e: any) => s + (e.sleepHours || 0), 0) / healthData.length).toFixed(1);
-        const avgWater = (healthData.reduce((s: number, e: any) => s + (e.waterLitres || 0), 0) / healthData.length).toFixed(1);
-        const avgHR = Math.round(healthData.reduce((s: number, e: any) => s + (e.heartRate || 0), 0) / healthData.length);
+        const avgSteps = Math.round(
+            input.healthData.reduce((sum, entry) => sum + (entry.steps ?? 0), 0) / input.healthData.length
+        );
+        const avgSleep = (
+            input.healthData.reduce((sum, entry) => sum + (entry.sleepHours ?? 0), 0) / input.healthData.length
+        ).toFixed(1);
+        const avgWater = (
+            input.healthData.reduce((sum, entry) => sum + (entry.waterLitres ?? 0), 0) / input.healthData.length
+        ).toFixed(1);
+        const avgHR = Math.round(
+            input.healthData.reduce((sum, entry) => sum + (entry.heartRate ?? 0), 0) / input.healthData.length
+        );
 
-        const moodSummary = moodData && moodData.length > 0
-            ? `Mood entries: ${moodData.map((m: any) => `${m.mood} (energy: ${m.energyLevel}/10, stress: ${m.stressLevel}/10)`).join(', ')}`
+        const moodSummary = input.moodData.length > 0
+            ? `Mood entries: ${input.moodData.map((entry) => `${entry.mood ?? 'unknown'} (energy: ${entry.energyLevel ?? 0}/10, stress: ${entry.stressLevel ?? 0}/10)`).join(', ')}`
             : 'No mood data logged this week.';
 
-        const userPrompt = `Here is the user's health tracking data for the past ${healthData.length} day(s):
+        const userPrompt = `Here is the user's health tracking data for the past ${input.healthData.length} day(s):
 
 HEALTH METRICS:
 - Average daily steps: ${avgSteps.toLocaleString()}
 - Average sleep: ${avgSleep} hours/night
 - Average water intake: ${avgWater} litres/day
 - Average heart rate: ${avgHR} BPM
-- Days logged: ${healthData.length} out of 7
+- Days logged: ${input.healthData.length} out of 7
 
 MOOD & ENERGY:
 ${moodSummary}
@@ -111,13 +175,13 @@ Format your response as JSON with this exact structure:
 
         const result = await model.generateContent(userPrompt);
         const text = result.response.text();
-
         const cleaned = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-        let parsed: any;
+
+        let llmParsed: LlmAnalysisPayload;
         try {
-            parsed = JSON.parse(cleaned);
+            llmParsed = JSON.parse(cleaned) as LlmAnalysisPayload;
         } catch {
-            parsed = {
+            llmParsed = {
                 narrative: text,
                 tips: ['Log your health data daily for more personalised tips.'],
                 predictedOutcome: 'With consistent tracking, you will start seeing meaningful patterns in your health.',
@@ -125,48 +189,39 @@ Format your response as JSON with this exact structure:
             };
         }
 
-        // ── 3. Save to MongoDB cache ──────────────────────────────────────────────
+        const normalized = normalizeParsedResponse(llmParsed);
+
+        const generatedAt = new Date();
         await WeeklyAnalysisCache.findOneAndUpdate(
             { userId, weekKey },
             {
-                userId, weekKey,
-                narrative: parsed.narrative,
-                tips: parsed.tips,
-                predictedOutcome: parsed.predictedOutcome,
-                disclaimer: parsed.disclaimer,
-                createdAt: new Date(),
+                userId,
+                weekKey,
+                narrative: normalized.narrative,
+                tips: normalized.tips,
+                predictedOutcome: normalized.predictedOutcome,
+                disclaimer: normalized.disclaimer,
+                createdAt: generatedAt,
             },
             { upsert: true, new: true }
         );
 
-        console.log(`[AI] Cached result for user ${userId} week ${weekKey}`);
-        res.json({ success: true, data: { ...parsed, fromCache: false, cacheWeek: weekKey } });
+        sendSuccess(res, { ...normalized, fromCache: false, cacheWeek: weekKey, generatedAt: generatedAt.toISOString() });
+    } catch (error: unknown) {
+        console.warn('[AI] Gemini unavailable — activating rule-based fallback');
 
-    } catch (err: any) {
-        console.warn('[AI] Gemini unavailable — activating rule-based fallback:', err?.message?.slice(0, 80));
-
-        // ── Fallback: generate analysis from rule-based engine ──────────────────
         try {
-            const { healthData, moodData } = req.body;
-            const userId = req.userId!;
-            const weekKey = getWeekKey();
-
-            const fallback = generateWellnessAnalysis(healthData || [], moodData || []);
-
-            // Cache the fallback result so repeated calls are instant
+            const fallback = generateWellnessAnalysis(input.healthData, input.moodData);
+            const generatedAt = new Date();
             await WeeklyAnalysisCache.findOneAndUpdate(
                 { userId, weekKey },
-                { userId, weekKey, ...fallback, createdAt: new Date() },
+                { userId, weekKey, ...fallback, createdAt: generatedAt },
                 { upsert: true, new: true }
-            ).catch(() => { }); // Don't fail if cache write errors
+            ).catch(() => undefined);
 
-            res.json({ success: true, data: fallback });
-        } catch (fallbackErr: any) {
-            console.error('[AI] Fallback also failed:', fallbackErr?.message);
-            res.status(500).json({
-                success: false,
-                error: 'Could not generate your analysis. Please try again.',
-            });
+            sendSuccess(res, { ...fallback, fromFallback: true, fromCache: false, cacheWeek: weekKey, generatedAt: generatedAt.toISOString() });
+        } catch {
+            sendError(res, 500, 'Could not generate your analysis. Please try again.');
         }
     }
 });
@@ -174,11 +229,17 @@ Format your response as JSON with this exact structure:
 // DELETE /api/ai/weekly-analysis/cache — force refresh (regenerate this week)
 router.delete('/weekly-analysis/cache', async (req: AuthRequest, res: Response): Promise<void> => {
     try {
+        const userId = req.userId;
+        if (!userId) {
+            sendError(res, 401, 'Unauthorized');
+            return;
+        }
+
         const weekKey = getWeekKey();
-        await WeeklyAnalysisCache.deleteOne({ userId: req.userId, weekKey });
-        res.json({ success: true, data: { message: 'Cache cleared — next request will regenerate from Gemini' } });
-    } catch (err) {
-        res.status(500).json({ success: false, error: 'Failed to clear cache' });
+        await WeeklyAnalysisCache.deleteOne({ userId, weekKey });
+        sendSuccess(res, { message: 'Cache cleared — next request will regenerate from Gemini' });
+    } catch {
+        sendError(res, 500, 'Failed to clear cache');
     }
 });
 

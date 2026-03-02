@@ -1,19 +1,31 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
 import { ScreenLayout } from '../../components/ScreenLayout';
 import { ArrowLeft, Lock } from 'lucide-react-native';
 import { GamificationService } from '../../lib/gamification';
 import { useAuth } from '../../contexts/AuthContext';
 import { LinearGradient } from 'expo-linear-gradient';
+import type { AppScreenProps } from '../../lib/navigation/types';
+import { EmptyState } from '../../components/ui/EmptyState';
 
-export default function AchievementsScreen({ navigation }: any) {
+interface BadgeProgress {
+    id: string;
+    name: string;
+    description: string;
+    icon: string;
+    category: string;
+    isUnlocked: boolean;
+}
+
+export default function AchievementsScreen({ navigation }: AppScreenProps<'Achievements'>) {
     const { user } = useAuth();
-    const [badges, setBadges] = useState<any[]>([]);
+    const [badges, setBadges] = useState<BadgeProgress[]>([]);
     const [loading, setLoading] = useState(true);
 
     useEffect(() => { loadBadges(); }, [user]);
 
     const loadBadges = async () => {
+        setLoading(true);
         try {
             const userId = user?.id ?? 'demo-user';
             await GamificationService.checkAchievements(userId);
@@ -39,41 +51,59 @@ export default function AchievementsScreen({ navigation }: any) {
                 </LinearGradient>
 
                 <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-                    {/* Stats Summary */}
-                    <View style={styles.statsCard}>
-                        <View style={styles.statCol}>
-                            <Text style={styles.statValue}>{unlockedCount}</Text>
-                            <Text style={styles.statLabel}>Unlocked</Text>
+                    {loading ? (
+                        <View style={styles.stateCard}>
+                            <ActivityIndicator size="large" color="#d97706" />
+                            <Text style={styles.stateTitle}>Loading achievements...</Text>
+                            <Text style={styles.stateSub}>Checking your latest progress</Text>
                         </View>
-                        <View style={styles.statDivider} />
-                        <View style={styles.statCol}>
-                            <Text style={styles.statValue}>{totalCount}</Text>
-                            <Text style={styles.statLabel}>Total Available</Text>
+                    ) : badges.length === 0 ? (
+                        <View style={styles.emptyCard}>
+                            <EmptyState
+                                icon="🏅"
+                                title="No achievements yet"
+                                description="Log daily vitals and complete weekly activities to unlock your first badge."
+                            />
                         </View>
-                    </View>
-
-                    {/* Badges Grid */}
-                    <View style={styles.grid}>
-                        {badges.map((badge) => (
-                            <View key={badge.id} style={styles.gridItem}>
-                                <View style={[styles.badgeCard, !badge.isUnlocked && styles.badgeLocked]}>
-                                    <View style={[styles.iconWrap, badge.isUnlocked ? { backgroundColor: '#fffbeb' } : { backgroundColor: '#f1f5f9' }]}>
-                                        {badge.isUnlocked ? (
-                                            <Text style={styles.badgeEmoji}>{badge.icon}</Text>
-                                        ) : (
-                                            <Lock size={20} color="#94a3b8" />
-                                        )}
-                                    </View>
-                                    <Text style={[styles.badgeName, !badge.isUnlocked && { color: '#64748b' }]}>
-                                        {badge.name}
-                                    </Text>
-                                    <Text style={styles.badgeDesc} numberOfLines={2}>
-                                        {badge.description}
-                                    </Text>
+                    ) : (
+                        <>
+                            {/* Stats Summary */}
+                            <View style={styles.statsCard}>
+                                <View style={styles.statCol}>
+                                    <Text style={styles.statValue}>{unlockedCount}</Text>
+                                    <Text style={styles.statLabel}>Unlocked</Text>
+                                </View>
+                                <View style={styles.statDivider} />
+                                <View style={styles.statCol}>
+                                    <Text style={styles.statValue}>{totalCount}</Text>
+                                    <Text style={styles.statLabel}>Total Available</Text>
                                 </View>
                             </View>
-                        ))}
-                    </View>
+
+                            {/* Badges Grid */}
+                            <View style={styles.grid}>
+                                {badges.map((badge) => (
+                                    <View key={badge.id} style={styles.gridItem}>
+                                        <View style={[styles.badgeCard, !badge.isUnlocked && styles.badgeLocked]}>
+                                            <View style={[styles.iconWrap, badge.isUnlocked ? { backgroundColor: '#fffbeb' } : { backgroundColor: '#f1f5f9' }]}>
+                                                {badge.isUnlocked ? (
+                                                    <Text style={styles.badgeEmoji}>{badge.icon}</Text>
+                                                ) : (
+                                                    <Lock size={20} color="#94a3b8" />
+                                                )}
+                                            </View>
+                                            <Text style={[styles.badgeName, !badge.isUnlocked && { color: '#64748b' }]}>
+                                                {badge.name}
+                                            </Text>
+                                            <Text style={styles.badgeDesc} numberOfLines={2}>
+                                                {badge.description}
+                                            </Text>
+                                        </View>
+                                    </View>
+                                ))}
+                            </View>
+                        </>
+                    )}
                 </ScrollView>
             </View>
         </ScreenLayout>
@@ -87,6 +117,21 @@ const styles = StyleSheet.create({
     headerTitle: { fontSize: 24, fontWeight: '800', color: '#fff' },
     headerSub: { fontSize: 13, color: 'rgba(255,255,255,0.75)', marginTop: 4 },
     scroll: { padding: 16, paddingBottom: 40 },
+    stateCard: {
+        backgroundColor: '#fff',
+        borderRadius: 20,
+        padding: 28,
+        alignItems: 'center',
+        marginTop: 8,
+        shadowColor: '#f59e0b',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.15,
+        shadowRadius: 12,
+        elevation: 4,
+    },
+    stateTitle: { fontSize: 16, fontWeight: '700', color: '#1e1b4b', marginTop: 12 },
+    stateSub: { fontSize: 13, color: '#6b7280', marginTop: 6 },
+    emptyCard: { marginTop: 8 },
     statsCard: { flexDirection: 'row', backgroundColor: '#fff', borderRadius: 20, padding: 20, marginBottom: 20, shadowColor: '#f59e0b', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.15, shadowRadius: 12, elevation: 4 },
     statCol: { flex: 1, alignItems: 'center' },
     statValue: { fontSize: 32, fontWeight: '800', color: '#d97706' },

@@ -1,6 +1,6 @@
 import mongoose, { Document, Schema } from 'mongoose';
 
-export type MoodType = 'happy' | 'sad' | 'stressed' | 'tired' | 'energetic' | 'neutral';
+export type MoodType = 'happy' | 'sad' | 'stressed' | 'tired' | 'energetic' | 'neutral' | 'calm' | 'anxious' | 'excited';
 
 export interface IMoodEntry extends Document {
     userId: mongoose.Types.ObjectId;
@@ -18,7 +18,7 @@ const MoodEntrySchema = new Schema<IMoodEntry>(
         date: { type: Date, required: true },
         mood: {
             type: String,
-            enum: ['happy', 'sad', 'stressed', 'tired', 'energetic', 'neutral'],
+            enum: ['happy', 'sad', 'stressed', 'tired', 'energetic', 'neutral', 'calm', 'anxious', 'excited'],
             required: true,
         },
         energyLevel: { type: Number, required: true, min: 1, max: 10 },
@@ -27,5 +27,8 @@ const MoodEntrySchema = new Schema<IMoodEntry>(
     },
     { timestamps: true }
 );
+
+// One mood entry per user per day (date normalized to UTC midnight by routes).
+MoodEntrySchema.index({ userId: 1, date: 1 }, { unique: true });
 
 export default mongoose.model<IMoodEntry>('MoodEntry', MoodEntrySchema);

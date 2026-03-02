@@ -3,7 +3,7 @@ import mongoose, { Document, Schema } from 'mongoose';
 export interface IAvatar extends Document {
     userId: mongoose.Types.ObjectId;
     avatarImageUrl: string;
-    generationMetadata?: Record<string, any>;
+    generationMetadata?: Record<string, unknown>;
     createdAt: Date;
     updatedAt: Date;
 }

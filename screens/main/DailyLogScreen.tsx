@@ -1,13 +1,16 @@
 import React, { useState } from "react";
-import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator } from "react-native";
+import { View, Text, ScrollView, ActivityIndicator, Pressable, Platform, StyleSheet } from "react-native";
 import Slider from "@react-native-community/slider";
 import { ScreenLayout } from "../../components/ScreenLayout";
-import { Button } from "../../components/ui/Button";
 import { Input } from "../../components/ui/Input";
-import { Activity, Moon, Smile, ArrowLeft, Save, Calendar, User } from "lucide-react-native";
+import { Activity, Moon, Smile, ArrowLeft, Calendar, User } from "lucide-react-native";
 import { useToast } from "../../components/ui/Toast";
-import { logHealth, logMood } from "../../lib/api/auth";
+import { saveDailyLog } from "../../lib/api/auth";
 import { useAuth } from "../../contexts/AuthContext";
+import type { AppScreenProps } from "../../lib/navigation/types";
+import { getLocalDateYmd } from "../../lib/date/localDay";
+
+type DailyLogScreenProps = AppScreenProps<'DailyLog'> | AppScreenProps<'DataEntry'>;
 
 // Tabs
 const sections = [
@@ -16,18 +19,22 @@ const sections = [
     { title: "Mood", icon: Smile, color: "bg-teal-500", theme: "teal" }
 ];
 
-export default function DailyLogScreen({ navigation }: any) {
+const moodOptions = ["happy", "calm", "tired", "stressed"] as const;
+
+export default function DailyLogScreen({ navigation }: DailyLogScreenProps) {
     const { showToast } = useToast();
     const { user } = useAuth(); // ✅ user from MongoDB via AuthContext
     const [currentSection, setCurrentSection] = useState(0);
+    const [hoveredTab, setHoveredTab] = useState<number | null>(null);
     const [loading, setLoading] = useState(false);
 
     // Form State
     const [steps, setSteps] = useState("8500");
     const [activeMinutes, setActiveMinutes] = useState(30);
     const [sleepHours, setSleepHours] = useState(7.5);
-    const [mood, setMood] = useState("good");
+    const [mood, setMood] = useState<(typeof moodOptions)[number]>("happy");
     const [energy, setEnergy] = useState(7);
+    const [stress, setStress] = useState(4);
 
 
     const handleNext = () => {
@@ -45,30 +52,33 @@ export default function DailyLogScreen({ navigation }: any) {
         }
         setLoading(true);
         try {
-            const today = new Date().toISOString().split('T')[0];
+            const today = getLocalDateYmd();
 
             // Save Health to MongoDB Atlas ☁️
             const energyScore = Math.min(100, Math.max(0,
                 ((sleepHours / 8) * 0.6 + (parseInt(steps) / 10000) * 0.4) * 100
             ));
+            const activeMinutesRounded = Math.round(activeMinutes);
 
-            await logHealth({
+            await saveDailyLog({
                 date: today,
                 steps: parseInt(steps) || 0,
+                activeMinutes: activeMinutesRounded,
                 sleepHours,
                 energyScore,
-            });
-
-            // Save Mood to MongoDB Atlas ☁️
-            await logMood({
-                date: today,
                 mood,
                 energyLevel: energy,
-                notes: 'Daily log entry',
+                stressLevel: stress,
+                healthNotes: `Active minutes: ${activeMinutesRounded}`,
+                moodNotes: `Daily log entry • Active minutes: ${activeMinutesRounded}`,
             });
 
             showToast('✅ Saved to MongoDB Atlas!', 'success');
-            navigation.replace('Main');
+            if (navigation.canGoBack()) {
+                navigation.goBack();
+            } else {
+                navigation.navigate('Main');
+            }
         } catch (error) {
             console.error(error);
             showToast('Failed to save entry', 'error');
@@ -174,14 +184,21 @@ export default function DailyLogScreen({ navigation }: any) {
                         <View>
                             <Text className="text-sm font-medium text-slate-700 mb-2">How do you feel?</Text>
                             <View className="flex-row justify-between gap-2">
-                                {['great', 'good', 'okay', 'bad'].map((m) => (
-                                    <TouchableOpacity
+                                {moodOptions.map((m) => (
+                                    <Pressable
                                         key={m}
                                         onPress={() => setMood(m)}
+                                        style={({ pressed }) => [
+                                            hoveredTab === (1000 + moodOptions.indexOf(m)) && mood !== m ? styles.softHover : undefined,
+                                            pressed ? styles.softPressed : undefined,
+                                            Platform.OS === 'web' ? ({ cursor: 'pointer' } as any) : undefined,
+                                        ]}
+                                        onHoverIn={() => setHoveredTab(1000 + moodOptions.indexOf(m))}
+                                        onHoverOut={() => setHoveredTab(null)}
                                         className={`flex-1 p-3 rounded-xl border-2 items-center ${mood === m ? 'border-teal-500 bg-teal-50' : 'border-slate-100 bg-white'}`}
                                     >
                                         <Text className={`capitalize ${mood === m ? 'font-bold text-teal-700' : 'text-slate-500'}`}>{m}</Text>
-                                    </TouchableOpacity>
+                                    </Pressable>
                                 ))}
                             </View>
                         </View>
@@ -202,6 +219,23 @@ export default function DailyLogScreen({ navigation }: any) {
                                 thumbTintColor="#0d9488"
                             />
                         </View>
+
+                        <View className="mt-4">
+                            <View className="flex-row justify-between mb-2">
+                                <Text className="text-sm font-medium text-slate-700">Stress Level</Text>
+                                <Text className="text-sm font-bold text-red-500">{Math.round(stress)}/10</Text>
+                            </View>
+                            <Slider
+                                minimumValue={1}
+                                maximumValue={10}
+                                step={1}
+                                value={stress}
+                                onValueChange={setStress}
+                                minimumTrackTintColor="#ef4444"
+                                maximumTrackTintColor="#e2e8f0"
+                                thumbTintColor="#ef4444"
+                            />
+                        </View>
                     </View>
                 );
         }
@@ -212,6 +246,18 @@ export default function DailyLogScreen({ navigation }: any) {
             <View className="flex-1">
                 {/* Header Section */}
                 <View className="px-6 pt-4 pb-8">
+                    <Pressable
+                        onPress={() => navigation.goBack()}
+                        style={({ pressed }) => [
+                            styles.hoverLift,
+                            pressed ? styles.softPressed : undefined,
+                            Platform.OS === 'web' ? ({ cursor: 'pointer' } as any) : undefined,
+                        ]}
+                        className="self-start mb-4 flex-row items-center space-x-2 rounded-full border border-white/35 bg-white/20 px-4 py-2"
+                    >
+                        <ArrowLeft size={16} color="white" />
+                        <Text className="text-white font-semibold">Back</Text>
+                    </Pressable>
                     <Text className="text-white text-3xl font-bold mb-1">Daily Demo Log</Text>
                     <Text className="text-white/80 text-base mb-4">Enter simulated values for today.</Text>
 
@@ -243,16 +289,23 @@ export default function DailyLogScreen({ navigation }: any) {
                             const isActive = index === currentSection;
                             const Icon = section.icon;
                             return (
-                                <TouchableOpacity
+                                <Pressable
                                     key={index}
                                     onPress={() => setCurrentSection(index)}
+                                    onHoverIn={() => setHoveredTab(index)}
+                                    onHoverOut={() => setHoveredTab(null)}
+                                    style={({ pressed }) => [
+                                        hoveredTab === index && !isActive ? styles.tabHover : undefined,
+                                        pressed ? styles.tabPressed : undefined,
+                                        Platform.OS === 'web' ? ({ cursor: 'pointer' } as any) : undefined,
+                                    ]}
                                     className={`flex-1 flex-row items-center justify-center py-2 rounded-lg space-x-2 ${isActive ? 'bg-purple-600 shadow-md' : ''}`}
                                 >
                                     <Icon size={16} color={isActive ? 'white' : '#94a3b8'} />
                                     <Text className={`text-xs font-bold ${isActive ? 'text-white' : 'text-slate-400'}`}>
                                         {section.title}
                                     </Text>
-                                </TouchableOpacity>
+                                </Pressable>
                             )
                         })}
                     </View>
@@ -267,21 +320,31 @@ export default function DailyLogScreen({ navigation }: any) {
                     {/* Footer Navigation */}
                     <View className="flex-row space-x-4 mt-auto">
                         {currentSection > 0 && (
-                            <TouchableOpacity
+                            <Pressable
                                 onPress={() => setCurrentSection(currentSection - 1)}
+                                style={({ pressed }) => [
+                                    styles.hoverLift,
+                                    pressed ? styles.softPressed : undefined,
+                                    Platform.OS === 'web' ? ({ cursor: 'pointer' } as any) : undefined,
+                                ]}
                                 className="flex-1 bg-white border border-purple-100 py-4 rounded-full items-center justify-center"
                             >
                                 <Text className="text-purple-400 font-bold">Previous</Text>
-                            </TouchableOpacity>
+                            </Pressable>
                         )}
-                        <TouchableOpacity
+                        <Pressable
                             onPress={handleNext}
+                            style={({ pressed }) => [
+                                styles.hoverLiftStrong,
+                                pressed ? styles.primaryPressed : undefined,
+                                Platform.OS === 'web' ? ({ cursor: 'pointer' } as any) : undefined,
+                            ]}
                             className="flex-1 bg-purple-600 py-4 rounded-full items-center justify-center shadow-lg shadow-purple-200"
                         >
                             <Text className="text-white font-bold text-lg">
                                 {currentSection === sections.length - 1 ? "Save & Continue" : "Next Section"}
                             </Text>
-                        </TouchableOpacity>
+                        </Pressable>
                     </View>
 
                 </View>
@@ -295,3 +358,33 @@ export default function DailyLogScreen({ navigation }: any) {
         </ScreenLayout>
     );
 }
+
+const styles = StyleSheet.create({
+    hoverLift: {
+        transform: [{ translateY: -1 }],
+        opacity: 0.98,
+    },
+    hoverLiftStrong: {
+        transform: [{ translateY: -2 }],
+        shadowOpacity: 0.26,
+    },
+    softHover: {
+        transform: [{ translateY: -1 }],
+        borderRadius: 12,
+    },
+    softPressed: {
+        opacity: 0.9,
+        transform: [{ scale: 0.985 }],
+    },
+    primaryPressed: {
+        opacity: 0.92,
+        transform: [{ scale: 0.988 }],
+    },
+    tabHover: {
+        backgroundColor: '#f5f3ff',
+    },
+    tabPressed: {
+        opacity: 0.9,
+        transform: [{ scale: 0.985 }],
+    },
+});

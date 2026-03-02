@@ -1,8 +1,8 @@
-import { Text, TouchableOpacity, TouchableOpacityProps, View } from "react-native";
+import { Platform, Pressable, StyleSheet, Text, View } from "react-native";
+import type { ComponentProps, ReactNode } from "react";
 import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "../../lib/utils";
-import clsx from "clsx";
-import { twMerge } from "tailwind-merge";
+import { useState } from "react";
 
 // Utility for class merging (similar to shadcn/ui) already imported
 
@@ -34,11 +34,12 @@ const buttonVariants = cva(
 );
 
 interface ButtonProps
-    extends TouchableOpacityProps,
+    extends Omit<ComponentProps<typeof Pressable>, "children">,
     VariantProps<typeof buttonVariants> {
     label?: string;
     labelClasses?: string;
-    icon?: React.ReactNode;
+    icon?: ReactNode;
+    children?: ReactNode;
 }
 
 export function Button({
@@ -51,9 +52,21 @@ export function Button({
     icon,
     ...props
 }: ButtonProps) {
+    const [hovered, setHovered] = useState(false);
+    const isDisabled = !!props.disabled;
+
     return (
-        <TouchableOpacity
+        <Pressable
             className={cn(buttonVariants({ variant, size, className }))}
+            onHoverIn={() => !isDisabled && setHovered(true)}
+            onHoverOut={() => setHovered(false)}
+            style={({ pressed }) => [
+                hovered && !isDisabled ? styles.hovered : undefined,
+                pressed && !isDisabled ? styles.pressed : undefined,
+                Platform.OS === "web"
+                    ? ({ cursor: isDisabled ? "not-allowed" : "pointer" } as any)
+                    : undefined,
+            ]}
             {...props}
         >
             {icon && <View className="mr-2">{icon}</View>}
@@ -72,6 +85,17 @@ export function Button({
             ) : (
                 children
             )}
-        </TouchableOpacity>
+        </Pressable>
     );
 }
+
+const styles = StyleSheet.create({
+    hovered: {
+        transform: [{ translateY: -1 }],
+        opacity: 0.97,
+    },
+    pressed: {
+        opacity: 0.9,
+        transform: [{ scale: 0.99 }],
+    },
+});

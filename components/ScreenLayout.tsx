@@ -3,6 +3,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { StatusBar } from "expo-status-bar";
 import { cn } from "../lib/utils";
+import { appTheme, gradients } from "../lib/theme/tokens";
 
 interface ScreenLayoutProps extends ViewProps {
     gradientBackground?: boolean;
@@ -21,8 +22,7 @@ export function ScreenLayout({
     if (gradientBackground) {
         return (
             <LinearGradient
-                // Figma-matched: soft lavender → light purple → near-white
-                colors={["#c4b5fd", "#ddd6fe", "#f5f3ff"]}
+                colors={gradients.screen}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 0.5, y: 1 }}
                 style={[{ flex: 1 }, outerStyle]}
@@ -36,7 +36,7 @@ export function ScreenLayout({
     }
 
     return (
-        <View className={cn("flex-1 bg-violet-50", className)} style={[style, outerStyle]} {...props}>
+        <View className={cn("flex-1", className)} style={[{ backgroundColor: appTheme.colors.backgroundBottom }, style, outerStyle]} {...props}>
             <StatusBar style="dark" />
             <SafeAreaView className="flex-1">
                 {children}

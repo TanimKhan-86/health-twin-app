@@ -4,6 +4,7 @@ export interface IHealthEntry extends Document {
     userId: mongoose.Types.ObjectId;
     date: Date;
     steps: number;
+    activeMinutes: number;
     sleepHours: number;
     waterLitres: number;
     heartRate: number;
@@ -18,6 +19,7 @@ const HealthEntrySchema = new Schema<IHealthEntry>(
         userId: { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
         date: { type: Date, required: true },
         steps: { type: Number, default: 0, min: 0 },
+        activeMinutes: { type: Number, default: 0, min: 0, max: 1440 },
         sleepHours: { type: Number, default: 0, min: 0, max: 24 },
         waterLitres: { type: Number, default: 0, min: 0 },
         heartRate: { type: Number, default: 0, min: 0 },
@@ -27,5 +29,8 @@ const HealthEntrySchema = new Schema<IHealthEntry>(
     },
     { timestamps: true }
 );
+
+// One health entry per user per day (date normalized to UTC midnight by routes).
+HealthEntrySchema.index({ userId: 1, date: 1 }, { unique: true });
 
 export default mongoose.model<IHealthEntry>('HealthEntry', HealthEntrySchema);

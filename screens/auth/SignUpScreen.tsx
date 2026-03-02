@@ -6,8 +6,10 @@ import { Button } from "../../components/ui/Button";
 import { Heart, ArrowLeft, Check, Camera, Upload } from "lucide-react-native";
 import * as ImagePicker from 'expo-image-picker';
 import { useAuth } from "../../contexts/AuthContext";
+import { getToken } from "../../lib/api/client";
+import type { AppScreenProps } from "../../lib/navigation/types";
 
-export default function SignUpScreen({ navigation }: any) {
+export default function SignUpScreen({ navigation }: AppScreenProps<'SignUp'>) {
     const { register } = useAuth();
     const [step, setStep] = useState(1);
     const [isLoading, setIsLoading] = useState(false);
@@ -21,7 +23,8 @@ export default function SignUpScreen({ navigation }: any) {
         age: "",
         height: "",
         weight: "",
-        profileImage: null as string | null
+        profileImage: null as string | null,
+        profileImageMime: null as string | null,
     });
 
     const handleNext = () => {
@@ -41,6 +44,11 @@ export default function SignUpScreen({ navigation }: any) {
             }
         }
 
+        if (step === 3 && !formData.profileImage) {
+            setErrorMsg("Please upload a selfie to continue.");
+            return;
+        }
+
         if (step < 3) setStep(step + 1);
         else handleSignup();
     };
@@ -53,25 +61,54 @@ export default function SignUpScreen({ navigation }: any) {
 
     const pickImage = async () => {
         const result = await ImagePicker.launchImageLibraryAsync({
-            mediaTypes: ['images'],  // ← new API (MediaTypeOptions deprecated)
+            mediaTypes: ImagePicker.MediaTypeOptions.Images,
             allowsEditing: true,
             aspect: [1, 1],
-            quality: 0.3,
-            base64: true,
+            quality: 0.65,
         });
 
         if (!result.canceled && result.assets[0]) {
             const asset = result.assets[0];
-            // Convert to a base64 data URI (storable in MongoDB)
-            const dataUri = asset.base64
-                ? `data:image/jpeg;base64,${asset.base64}`
-                : asset.uri; // fallback on platforms that don't return base64
-
-            console.log(`[SignUpScreen] Image Picked! Base64 present? ${!!asset.base64}. dataUri length:`, dataUri?.length, `Starts with:`, dataUri?.substring(0, 30));
-            setFormData({ ...formData, profileImage: dataUri });
+            setFormData({ ...formData, profileImage: asset.uri, profileImageMime: asset.mimeType ?? 'image/jpeg' });
         }
     };
 
+    const uploadProfileImage = async (photoUri: string, mimeType?: string | null) => {
+        const token = await getToken();
+        const apiUrl = process.env.EXPO_PUBLIC_API_URL || "http://localhost:4000";
+        const formData = new FormData();
+
+        if (photoUri.startsWith("data:") || photoUri.startsWith("blob:")) {
+            const response = await fetch(photoUri);
+            const blob = await response.blob();
+            formData.append("photo", blob, "profile.jpg");
+        } else {
+            formData.append("photo", {
+                uri: photoUri,
+                name: "profile.jpg",
+                type: mimeType || "image/jpeg",
+            } as unknown as Blob);
+        }
+
+        const response = await fetch(`${apiUrl}/api/avatar/setup`, {
+            method: "POST",
+            headers: {
+                ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            },
+            body: formData,
+        });
+
+        let payload: { success?: boolean; error?: string } | null = null;
+        try {
+            payload = (await response.json()) as { success?: boolean; error?: string };
+        } catch {
+            // keep null payload; status fallback below
+        }
+
+        if (!response.ok || payload?.success === false) {
+            throw new Error(payload?.error || `Photo upload failed (${response.status})`);
+        }
+    };
 
     const handleSignup = async () => {
         setIsLoading(true);
@@ -84,7 +121,6 @@ export default function SignUpScreen({ navigation }: any) {
                 age: formData.age ? parseInt(formData.age) : undefined,
                 heightCm: formData.height ? parseFloat(formData.height) : undefined,
                 weightKg: formData.weight ? parseFloat(formData.weight) : undefined,
-                profileImage: formData.profileImage ?? undefined,
             };
 
             // Call AuthContext → backend → MongoDB (saves ALL fields)
@@ -93,6 +129,19 @@ export default function SignUpScreen({ navigation }: any) {
             if (!user) {
                 setErrorMsg("Failed to create account. Email might already be in use.");
                 return;
+            }
+
+            if (formData.profileImage) {
+                try {
+                    await uploadProfileImage(formData.profileImage, formData.profileImageMime);
+                } catch (uploadError: unknown) {
+                    const message = uploadError instanceof Error ? uploadError.message : "Could not upload profile picture";
+                    console.warn("[SignUp] Profile image upload failed:", message);
+                    Alert.alert(
+                        "Profile created",
+                        "Your account was created, but profile photo upload failed. You can upload it later in Settings."
+                    );
+                }
             }
 
             console.log(`✅ Registered in MongoDB: ${user.id} with full profile`);
@@ -252,7 +301,7 @@ export default function SignUpScreen({ navigation }: any) {
                     <View className="space-y-6 items-center py-4">
                         <Text className="text-xl font-bold text-slate-800">Profile Picture</Text>
                         <Text className="text-center text-slate-500 px-4">
-                            Upload a photo to personalize your dashboard and digital twin.
+                            Upload a real selfie. This is required to generate your NanoBana avatar and emotion videos.
                         </Text>
 
                         <TouchableOpacity

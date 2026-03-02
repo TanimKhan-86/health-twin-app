@@ -6,19 +6,43 @@ import { LinearGradient } from "expo-linear-gradient";
 import * as ImagePicker from 'expo-image-picker';
 import { apiFetch, getToken } from "../../lib/api/client";
 import { useToast } from "../../components/ui/Toast";
+import { useAuth } from "../../contexts/AuthContext";
+import type { AppScreenProps } from "../../lib/navigation/types";
+import type { ApiEnvelope } from "../../lib/api/contracts";
 
-export default function AvatarSetupScreen({ navigation }: any) {
+export default function AvatarSetupScreen({ navigation }: AppScreenProps<'AvatarSetup'>) {
+    const { user } = useAuth();
     const { showToast } = useToast();
     const [photoUri, setPhotoUri] = useState<string | null>(null);
     const [loading, setLoading] = useState(false);
     const [success, setSuccess] = useState(false);
+    const [statusHint, setStatusHint] = useState<string | null>(null);
+    const [avatarMode, setAvatarMode] = useState<'prebuilt' | 'nanobana'>('prebuilt');
+    const [requiredStates, setRequiredStates] = useState<string[]>(['happy', 'sad', 'sleepy']);
 
     // Check if user already has an avatar
     useEffect(() => {
-        apiFetch<{ hasAvatar: boolean; avatarUrl?: string }>('/api/avatar/status').then((res) => {
+        apiFetch<{
+            hasAvatar: boolean;
+            avatarUrl?: string;
+            ready?: boolean;
+            generatedStates?: string[];
+            mode?: 'prebuilt' | 'nanobana';
+            requiredStates?: string[];
+        }>('/api/avatar/status').then((res) => {
             if (res.success && res.data?.hasAvatar) {
+                setAvatarMode(res.data.mode || 'prebuilt');
+                setRequiredStates(res.data.requiredStates || ['happy', 'sad', 'sleepy']);
                 setPhotoUri(res.data.avatarUrl ?? null);
-                setSuccess(true);
+                setSuccess(!!res.data.ready);
+                if (res.data.ready) {
+                    setStatusHint(`Avatar is fully ready with loops: ${(res.data.requiredStates || ['happy', 'sad', 'sleepy']).join(', ')}.`);
+                } else {
+                    setStatusHint(`Avatar found. Generated states: ${(res.data.generatedStates || []).join(', ') || 'none'}`);
+                }
+            } else if (res.success && res.data) {
+                setAvatarMode(res.data.mode || 'prebuilt');
+                setRequiredStates(res.data.requiredStates || ['happy', 'sad', 'sleepy']);
             }
         });
     }, []);
@@ -39,51 +63,92 @@ export default function AvatarSetupScreen({ navigation }: any) {
 
     // Safe multipart fetch
     const uploadAvatar = async () => {
-        if (!photoUri) return;
         setLoading(true);
 
         try {
             const token = await getToken();
+            const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:4000';
+            const usingProfileImageFallback = !photoUri;
+            let res: Response;
 
-            const formData = new FormData();
+            if (photoUri) {
+                const formData = new FormData();
 
-            // Expo Web Workaround for FormData with ImagePicker
-            if (photoUri.startsWith('data:') || photoUri.startsWith('blob:')) {
-                const response = await fetch(photoUri);
-                const blob = await response.blob();
-                formData.append('photo', blob, 'avatar.jpg');
+                // Expo Web workaround for FormData with ImagePicker
+                if (photoUri.startsWith('data:') || photoUri.startsWith('blob:')) {
+                    const response = await fetch(photoUri);
+                    const blob = await response.blob();
+                    formData.append('photo', blob, 'avatar.jpg');
+                } else {
+                    formData.append('photo', {
+                        uri: photoUri,
+                        name: 'avatar.jpg',
+                        type: 'image/jpeg',
+                    } as unknown as Blob);
+                }
+
+                res = await fetch(`${API_URL}/api/avatar/setup`, {
+                    method: 'POST',
+                    headers: {
+                        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+                    },
+                    body: formData,
+                });
             } else {
-                formData.append('photo', {
-                    uri: photoUri,
-                    name: 'avatar.jpg',
-                    type: 'image/jpeg',
-                } as any);
+                // No upload provided: backend will use the user's saved profileImage.
+                res = await fetch(`${API_URL}/api/avatar/setup`, {
+                    method: 'POST',
+                    headers: {
+                        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+                    },
+                });
             }
 
-            const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:4000';
-
-            const res = await fetch(`${API_URL}/api/avatar/setup`, {
-                method: 'POST',
-                headers: {
-                    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-                },
-                body: formData,
-            });
-
-            let data: any = null;
+            let data: ApiEnvelope<{
+                message?: string;
+                mode?: 'prebuilt' | 'nanobana';
+                ready?: boolean;
+                requiredStates?: string[];
+            }> | null = null;
             try {
-                data = await res.json();
+                data = (await res.json()) as ApiEnvelope<{
+                    message?: string;
+                    mode?: 'prebuilt' | 'nanobana';
+                    ready?: boolean;
+                    requiredStates?: string[];
+                }>;
             } catch {
                 throw new Error(`Avatar setup failed (${res.status})`);
             }
-            if (!res.ok || !data?.success) throw new Error(data?.error || `Avatar setup failed (${res.status})`);
+            if (!res.ok || !data || !data.success) {
+                const errorMessage = data && !data.success ? data.error : `Avatar setup failed (${res.status})`;
+                throw new Error(errorMessage);
+            }
+            const payload = data.data;
 
-            showToast('Avatar generated! Animations are processing.', 'success');
+            const backendMessage = payload?.message || '';
+            showToast(
+                backendMessage || (
+                    usingProfileImageFallback
+                        ? 'Avatar setup completed.'
+                        : 'Avatar setup completed.'
+                ),
+                'success'
+            );
             setSuccess(true);
-            setTimeout(() => navigation.goBack(), 3000);
+            const nextStates: string[] = payload?.requiredStates || requiredStates;
+            setRequiredStates(nextStates);
+            if (payload?.mode) {
+                setAvatarMode(payload.mode);
+            }
+            setStatusHint(
+                payload?.ready
+                    ? `${nextStates.join(', ')} loops are ready.`
+                    : backendMessage || 'Avatar setup completed.'
+            );
 
-        } catch (e: any) {
-            showToast(e.message || 'Error generating avatar', 'error');
+        } catch (e: unknown) {
+            showToast(e instanceof Error ? e.message : 'Error generating avatar', 'error');
         } finally {
             setLoading(false);
         }
@@ -98,14 +163,24 @@ export default function AvatarSetupScreen({ navigation }: any) {
                         <Text style={styles.backText}>Back</Text>
                     </TouchableOpacity>
                     <Text style={styles.headerTitle}>Digital Twin Setup</Text>
-                    <Text style={styles.headerSub}>Powered by NanoBana AI 🧬</Text>
+                    <Text style={styles.headerSub}>
+                        {avatarMode === 'prebuilt' ? 'Prebuilt Avatar Mode' : 'Powered by NanoBana AI'}
+                    </Text>
                 </LinearGradient>
 
                 <View style={styles.content}>
                     <View style={styles.card}>
                         <Text style={styles.instructions}>
-                            Upload a clear photo of your face, and NanoBana will generate a dynamic, animated digital twin that reacts to your daily health data!
+                            {avatarMode === 'prebuilt'
+                                ? `Generation API is disabled. Uploading here only updates your profile photo. Avatar media should be seeded with pre-generated files (${requiredStates.join(', ')}).`
+                                : `Upload a clear photo of your face. NanoBana will create a stylized avatar plus loop-ready emotional animations (${requiredStates.join(', ')}).`}
                         </Text>
+                        {statusHint ? <Text style={styles.statusHint}>{statusHint}</Text> : null}
+                        {!photoUri && user?.profileImage ? (
+                            <Text style={styles.statusHint}>
+                                No new upload selected. Tap Generate to use your current profile picture.
+                            </Text>
+                        ) : null}
 
                         <TouchableOpacity onPress={handlePickImage} style={{ width: 200, height: 200, borderRadius: 100, backgroundColor: '#eff6ff', alignSelf: 'center', justifyContent: 'center', alignItems: 'center', overflow: 'hidden', borderWidth: 2, borderColor: '#bfdbfe', borderStyle: 'dashed', marginBottom: 24 }}>
                             {photoUri ? (
@@ -123,18 +198,28 @@ export default function AvatarSetupScreen({ navigation }: any) {
                             )}
                         </TouchableOpacity>
 
-                        {!loading && !success && photoUri && (
+                        {!loading && !success && (photoUri || user?.profileImage) && (
                             <TouchableOpacity onPress={uploadAvatar} style={styles.btnPrimary}>
                                 <UploadCloud size={20} color="white" />
-                                <Text style={styles.btnText}>Generate Avatar</Text>
+                                <Text style={styles.btnText}>
+                                    {avatarMode === 'prebuilt'
+                                        ? (photoUri ? 'Upload Profile Picture' : 'Refresh Avatar Status')
+                                        : (photoUri ? 'Generate Avatar' : 'Generate From Profile Picture')}
+                                </Text>
                             </TouchableOpacity>
                         )}
 
                         {loading && (
                             <View style={styles.loadingContainer}>
                                 <ActivityIndicator size="large" color="#3b82f6" />
-                                <Text style={styles.loadingText}>Synthesizing your Digital Twin...</Text>
-                                <Text style={styles.loadingSub}>This takes about 5 seconds</Text>
+                                <Text style={styles.loadingText}>
+                                    {avatarMode === 'prebuilt' ? 'Checking prebuilt avatar media...' : 'Building your NanoBana avatar system...'}
+                                </Text>
+                                <Text style={styles.loadingSub}>
+                                    {avatarMode === 'prebuilt'
+                                        ? `Expected states: ${requiredStates.join(', ')}`
+                                        : 'Generating high-quality loop animations'}
+                                </Text>
                             </View>
                         )}
 
@@ -142,7 +227,10 @@ export default function AvatarSetupScreen({ navigation }: any) {
                             <View style={styles.successContainer}>
                                 <CheckCircle size={48} color="#10b981" />
                                 <Text style={styles.successText}>Twin Activated!</Text>
-                                <Text style={styles.successSub}>Your profile and dashboard will now show your animated states.</Text>
+                                <Text style={styles.successSub}>Your dashboard can now auto-switch between {requiredStates.join(', ')} loops.</Text>
+                                <TouchableOpacity onPress={() => navigation.navigate('Main')} style={styles.successCtaBtn}>
+                                    <Text style={styles.successCtaText}>Go to Dashboard</Text>
+                                </TouchableOpacity>
                             </View>
                         )}
                     </View>
@@ -161,6 +249,7 @@ const styles = StyleSheet.create({
     content: { padding: 16, flex: 1, marginTop: 10 },
     card: { backgroundColor: '#fff', borderRadius: 24, padding: 24, shadowColor: '#3b82f6', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.1, shadowRadius: 16, elevation: 4 },
     instructions: { fontSize: 15, color: '#4b5563', lineHeight: 22, textAlign: 'center', marginBottom: 24 },
+    statusHint: { fontSize: 12, color: '#1d4ed8', textAlign: 'center', marginBottom: 16, lineHeight: 18 },
     imagePicker: { width: 200, height: 200, borderRadius: 100, backgroundColor: '#eff6ff', alignSelf: 'center', justifyContent: 'center', alignItems: 'center', overflow: 'hidden', borderWidth: 2, borderColor: '#bfdbfe', borderStyle: 'dashed', marginBottom: 24 },
     previewImage: { width: '100%', height: '100%' },
     placeholder: { alignItems: 'center' },
@@ -173,4 +262,6 @@ const styles = StyleSheet.create({
     successContainer: { alignItems: 'center', paddingVertical: 10 },
     successText: { marginTop: 12, fontSize: 20, fontWeight: '800', color: '#10b981' },
     successSub: { fontSize: 14, color: '#64748b', textAlign: 'center', marginTop: 4 },
+    successCtaBtn: { marginTop: 16, backgroundColor: '#2563eb', borderRadius: 14, paddingHorizontal: 20, paddingVertical: 12 },
+    successCtaText: { color: '#fff', fontWeight: '700', fontSize: 14 },
 });

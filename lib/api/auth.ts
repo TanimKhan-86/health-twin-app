@@ -5,6 +5,17 @@
  */
 import { apiFetch } from './client';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import type {
+    AuthSessionDto,
+    AuthUserDto,
+    DailyLogSaveDto,
+    FutureInsightDto,
+    HealthEntryDto,
+    MoodEntryDto,
+    MoodType,
+    StreakDataDto,
+} from './contracts';
+import { getLocalDateYmd } from '../date/localDay';
 
 // Use the same key as client.ts — keeping them in sync prevents session loss
 const TOKEN_KEY = 'auth_token';
@@ -21,16 +32,11 @@ export async function removeToken(): Promise<void> {
 }
 
 // ─── Auth Types ───────────────────────────────────────────────────────────────
-export interface AuthUser {
-    id: string;
-    name: string;
-    email: string;
-    profileImage?: string;
-}
+export type AuthUser = AuthUserDto;
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 export async function register(name: string, email: string, password: string): Promise<AuthUser | null> {
-    const res = await apiFetch<{ token: string; user: AuthUser }>('/api/auth/register', {
+    const res = await apiFetch<AuthSessionDto>('/api/auth/register', {
         method: 'POST',
         body: JSON.stringify({ name, email, password }),
     });
@@ -42,7 +48,7 @@ export async function register(name: string, email: string, password: string): P
 }
 
 export async function login(email: string, password: string): Promise<AuthUser | null> {
-    const res = await apiFetch<{ token: string; user: AuthUser }>('/api/auth/login', {
+    const res = await apiFetch<AuthSessionDto>('/api/auth/login', {
         method: 'POST',
         body: JSON.stringify({ email, password }),
     });
@@ -57,6 +63,14 @@ export async function logout(): Promise<void> {
     await removeToken();
 }
 
+export async function deleteMyAccount(): Promise<boolean> {
+    const res = await apiFetch('/api/auth/me', { method: 'DELETE' });
+    if (res.success) {
+        await removeToken();
+    }
+    return res.success;
+}
+
 export async function isAuthenticated(): Promise<boolean> {
     const token = await getToken();
     return !!token;
@@ -66,6 +80,7 @@ export async function isAuthenticated(): Promise<boolean> {
 export interface HealthEntryData {
     date?: string;        // YYYY-MM-DD, defaults to today
     steps?: number;
+    activeMinutes?: number;
     sleepHours?: number;
     energyScore?: number; // 0–100
     heartRate?: number;
@@ -74,12 +89,7 @@ export interface HealthEntryData {
     notes?: string;
 }
 
-export interface HealthEntry extends HealthEntryData {
-    _id: string;
-    userId: string;
-    createdAt: string;
-    updatedAt: string;
-}
+export type HealthEntry = HealthEntryDto;
 
 export async function logHealth(data: HealthEntryData): Promise<HealthEntry | null> {
     const res = await apiFetch<HealthEntry>('/api/health', {
@@ -90,7 +100,8 @@ export async function logHealth(data: HealthEntryData): Promise<HealthEntry | nu
 }
 
 export async function getTodayHealth(): Promise<HealthEntry | null> {
-    const res = await apiFetch<HealthEntry>('/api/health/today');
+    const date = getLocalDateYmd();
+    const res = await apiFetch<HealthEntry>(`/api/health/today?date=${encodeURIComponent(date)}`);
     return res.success ? (res.data ?? null) : null;
 }
 
@@ -107,16 +118,13 @@ export async function seedDemoWeek(): Promise<boolean> {
 // ─── Mood Entries ─────────────────────────────────────────────────────────────
 export interface MoodEntryData {
     date?: string;
-    mood: string;         // 'happy' | 'sad' | 'tired' | 'anxious' | 'calm' | 'excited'
-    energyLevel?: number; // 1-10
+    mood: MoodType;
+    energyLevel: number;  // 1-10
+    stressLevel: number;  // 1-10
     notes?: string;
 }
 
-export interface MoodEntry extends MoodEntryData {
-    _id: string;
-    userId: string;
-    createdAt: string;
-}
+export type MoodEntry = MoodEntryDto;
 
 export async function logMood(data: MoodEntryData): Promise<MoodEntry | null> {
     const res = await apiFetch<MoodEntry>('/api/mood', {
@@ -127,7 +135,32 @@ export async function logMood(data: MoodEntryData): Promise<MoodEntry | null> {
 }
 
 export async function getTodayMood(): Promise<MoodEntry | null> {
-    const res = await apiFetch<MoodEntry>('/api/mood/today');
+    const date = getLocalDateYmd();
+    const res = await apiFetch<MoodEntry>(`/api/mood/today?date=${encodeURIComponent(date)}`);
+    return res.success ? (res.data ?? null) : null;
+}
+
+export interface DailyLogSaveData {
+    date?: string;
+    steps?: number;
+    activeMinutes?: number;
+    sleepHours?: number;
+    waterLitres?: number;
+    heartRate?: number;
+    energyScore?: number;
+    weight?: number;
+    healthNotes?: string;
+    mood: MoodType;
+    energyLevel: number;
+    stressLevel: number;
+    moodNotes?: string;
+}
+
+export async function saveDailyLog(data: DailyLogSaveData): Promise<DailyLogSaveDto | null> {
+    const res = await apiFetch<DailyLogSaveDto>('/api/daily-log', {
+        method: 'POST',
+        body: JSON.stringify(data),
+    });
     return res.success ? (res.data ?? null) : null;
 }
 
@@ -137,15 +170,20 @@ export async function getMoodHistory(limit = 30): Promise<MoodEntry[]> {
 }
 
 // ─── Streaks ──────────────────────────────────────────────────────────────────
-export interface StreakData {
-    currentStreak: number;
-    longestStreak: number;
-    lastLogDate: string | null;
-}
+export type StreakData = StreakDataDto;
 
 export async function getStreak(): Promise<StreakData> {
     const res = await apiFetch<StreakData>('/api/streak');
     return res.success && res.data ? res.data : { currentStreak: 0, longestStreak: 0, lastLogDate: null };
+}
+
+// ─── Future You ───────────────────────────────────────────────────────────────
+export type FutureInsight = FutureInsightDto;
+
+export async function getFutureInsight(days = 7): Promise<FutureInsight | null> {
+    const safeDays = Math.max(1, Math.min(30, Math.trunc(days)));
+    const res = await apiFetch<FutureInsight>(`/api/future/insight?days=${safeDays}`);
+    return res.success ? (res.data ?? null) : null;
 }
 
 // ─── Scores (legacy, keep for prediction feature) ────────────────────────────
