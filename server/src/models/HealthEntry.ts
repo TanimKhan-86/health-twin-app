@@ -11,6 +11,7 @@ export interface IHealthEntry extends Document {
     energyScore?: number;
     weight?: number;
     notes?: string;
+    source?: 'daily_log' | 'health_api' | 'seed_demo';
     createdAt: Date;
 }
 
@@ -26,6 +27,12 @@ const HealthEntrySchema = new Schema<IHealthEntry>(
         energyScore: { type: Number, default: null, min: 0, max: 100 },
         weight: { type: Number, min: 0 },
         notes: { type: String, trim: true },
+        source: {
+            type: String,
+            enum: ['daily_log', 'health_api', 'seed_demo'],
+            default: 'health_api',
+            index: true,
+        },
     },
     { timestamps: true }
 );

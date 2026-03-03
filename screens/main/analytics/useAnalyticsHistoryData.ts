@@ -1,5 +1,4 @@
-import { useCallback, useState } from "react";
-import { useFocusEffect } from "@react-navigation/native";
+import { useCallback, useEffect, useState } from "react";
 import { getHealthHistory, getMoodHistory } from "../../../lib/api/auth";
 import { HealthEntry, MoodEntry } from "./analyticsUtils";
 
@@ -24,11 +23,9 @@ export function useAnalyticsHistoryData(limit = 60) {
         }
     }, [limit]);
 
-    useFocusEffect(
-        useCallback(() => {
-            reload();
-        }, [reload])
-    );
+    useEffect(() => {
+        void reload();
+    }, [reload]);
 
     return {
         loading,

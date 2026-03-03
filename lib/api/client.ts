@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { NativeModules, Platform } from 'react-native';
 import type { ApiEnvelope, ApiErrorDetail } from './contracts';
 
 // ─── Base URL ─────────────────────────────────────────────────────────────────
@@ -53,20 +54,75 @@ function pushUnique(list: string[], value: string | null | undefined): void {
     if (!list.includes(normalized)) list.push(normalized);
 }
 
+function getWebHostnameSafe(): string | null {
+    const globalLike = globalThis as {
+        location?: { hostname?: unknown };
+        window?: { location?: { hostname?: unknown } };
+    };
+
+    if (typeof globalLike.location?.hostname === 'string' && globalLike.location.hostname.length > 0) {
+        return globalLike.location.hostname;
+    }
+
+    if (typeof globalLike.window?.location?.hostname === 'string' && globalLike.window.location.hostname.length > 0) {
+        return globalLike.window.location.hostname;
+    }
+
+    return null;
+}
+
+function getExpoHostSafe(): string | null {
+    const nativeModulesAny = NativeModules as unknown as {
+        SourceCode?: { scriptURL?: unknown };
+    };
+
+    const scriptUrl = nativeModulesAny.SourceCode?.scriptURL;
+    if (typeof scriptUrl !== 'string' || scriptUrl.trim().length === 0) {
+        return null;
+    }
+
+    try {
+        const parsed = new URL(scriptUrl);
+        if (!parsed.hostname) return null;
+        return parsed.hostname;
+    } catch {
+        return null;
+    }
+}
+
 function getApiBaseCandidates(): string[] {
     const candidates: string[] = [];
-    pushUnique(candidates, ENV_API_BASE || DEFAULT_API_BASE);
-    pushUnique(candidates, DEFAULT_API_BASE);
+    pushUnique(candidates, ENV_API_BASE);
 
-    if (typeof window !== 'undefined') {
-        const host = window.location.hostname;
+    if (Platform.OS !== 'web') {
+        const expoHost = getExpoHostSafe();
+        if (expoHost && expoHost !== 'localhost' && expoHost !== '127.0.0.1') {
+            pushUnique(candidates, `http://${expoHost}:4000`);
+        }
+
+        // Keep emulator/simulator-friendly fallbacks.
+        if (Platform.OS === 'android') {
+            pushUnique(candidates, 'http://10.0.2.2:4000');
+            pushUnique(candidates, 'http://10.0.3.2:4000');
+        } else if (Platform.OS === 'ios') {
+            pushUnique(candidates, DEFAULT_API_BASE);
+            pushUnique(candidates, 'http://127.0.0.1:4000');
+        }
+    }
+
+    const host = getWebHostnameSafe();
+    if (Platform.OS === 'web') {
         if (host === 'localhost' || host === '127.0.0.1') {
             pushUnique(candidates, 'http://localhost:4000');
             pushUnique(candidates, 'http://127.0.0.1:4000');
-        } else if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host)) {
+        } else if (host && /^\d{1,3}(\.\d{1,3}){3}$/.test(host)) {
             pushUnique(candidates, `http://${host}:4000`);
             pushUnique(candidates, DEFAULT_API_BASE);
         }
+    }
+
+    if (candidates.length === 0) {
+        pushUnique(candidates, DEFAULT_API_BASE);
     }
 
     return candidates;
@@ -169,7 +225,8 @@ export async function apiFetch<T = unknown>(
         }
     }
 
-    console.error(`[API] ${path} failed on bases [${bases.join(', ')}]:`, lastNetworkError);
+    // In Expo dev, console.error triggers a full red overlay even for handled failures.
+    console.warn(`[API] ${path} failed on bases [${bases.join(', ')}]: ${lastNetworkError}`);
     return {
         success: false,
         error: lastNetworkError,

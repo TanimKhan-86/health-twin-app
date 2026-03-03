@@ -13,6 +13,7 @@ export type {
     DailyLogSaveDto,
     StreakDataDto,
     SeedDemoResultDto,
+    ClearSeedDemoResultDto,
     AvatarStatusDto,
     AvatarStateDto,
     AvatarLibraryDto,

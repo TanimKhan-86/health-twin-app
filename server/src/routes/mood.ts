@@ -134,6 +134,7 @@ router.post('/', async (req: AuthRequest, res: Response): Promise<void> => {
                     mood: input.mood,
                     energyLevel: input.energyLevel,
                     stressLevel: input.stressLevel,
+                    source: 'mood_api',
                     ...(input.notes !== undefined ? { notes: input.notes } : {}),
                 },
                 $setOnInsert: {
@@ -168,7 +169,7 @@ router.put('/:id', async (req: AuthRequest, res: Response): Promise<void> => {
     try {
         const entry = await MoodEntry.findOneAndUpdate(
             { _id: params.id, userId: req.userId },
-            body,
+            { ...body, source: 'mood_api' },
             { new: true, runValidators: true }
         );
         if (!entry) {

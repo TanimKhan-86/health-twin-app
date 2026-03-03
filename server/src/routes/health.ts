@@ -9,6 +9,8 @@ import { parseBody, parseParams, parseQuery, QUERY_LIMITS } from '../lib/validat
 
 const router = Router();
 router.use(authenticate);
+const DEMO_HEALTH_NOTE_PATTERN = /^Demo entry day/i;
+const DEMO_MOOD_NOTE_PATTERN = /^Demo mood day/i;
 
 const dateInputSchema = z.union([z.string(), z.date()]);
 const todayQuerySchema = z.object({
@@ -141,52 +143,127 @@ router.post('/seed-demo', async (req: AuthRequest, res: Response): Promise<void>
 
         const moods = ['happy', 'energetic', 'neutral', 'tired', 'stressed', 'sad'] as const;
 
+        // Weekly Report window is "last 7 days before today": [today-7, today-1]
+        // Keep today's Daily Log intact so dashboard avatar continues to work.
+        const todayUtc = toUtcDayStart();
+        const startWindow = shiftUtcDays(todayUtc, -7);
+
         await Promise.all([
-            HealthEntry.deleteMany({ userId }),
-            MoodEntry.deleteMany({ userId }),
+            HealthEntry.deleteMany({
+                userId,
+                date: { $gte: startWindow, $lt: todayUtc },
+                $or: [
+                    { source: 'seed_demo' },
+                    { notes: DEMO_HEALTH_NOTE_PATTERN },
+                ],
+            }),
+            MoodEntry.deleteMany({
+                userId,
+                date: { $gte: startWindow, $lt: todayUtc },
+                $or: [
+                    { source: 'seed_demo' },
+                    { notes: DEMO_MOOD_NOTE_PATTERN },
+                ],
+            }),
         ]);
 
-        const healthDocs = [];
-        const moodDocs = [];
+        const healthWrites = [];
+        const moodWrites = [];
 
-        for (let i = 6; i >= 0; i -= 1) {
-            const date = shiftUtcDays(toUtcDayStart(), -i);
-            healthDocs.push({
-                userId,
-                date,
-                steps: 5000 + Math.floor(Math.random() * 7000),
-                activeMinutes: 15 + Math.floor(Math.random() * 75),
-                sleepHours: +(5 + Math.random() * 4).toFixed(1),
-                waterLitres: +(1.5 + Math.random() * 1.5).toFixed(1),
-                heartRate: 60 + Math.floor(Math.random() * 30),
-                energyScore: 40 + Math.floor(Math.random() * 60),
-                weight: +(70 + Math.random() * 5).toFixed(1),
-                notes: `Demo entry day ${7 - i}`,
-            });
+        // Seed exactly 7 days ending yesterday.
+        for (let offset = 7; offset >= 1; offset -= 1) {
+            const date = shiftUtcDays(todayUtc, -offset);
+            const dayNumber = 8 - offset; // 1..7
 
-            moodDocs.push({
-                userId,
-                date,
-                mood: moods[Math.floor(Math.random() * moods.length)],
-                energyLevel: 4 + Math.floor(Math.random() * 7),
-                stressLevel: 1 + Math.floor(Math.random() * 6),
-                notes: `Demo mood day ${7 - i}`,
-            });
+            healthWrites.push(
+                HealthEntry.findOneAndUpdate(
+                    { userId, date },
+                    {
+                        $set: {
+                            steps: 5000 + Math.floor(Math.random() * 7000),
+                            activeMinutes: 15 + Math.floor(Math.random() * 75),
+                            sleepHours: +(5 + Math.random() * 4).toFixed(1),
+                            waterLitres: +(1.5 + Math.random() * 1.5).toFixed(1),
+                            heartRate: 60 + Math.floor(Math.random() * 30),
+                            energyScore: 40 + Math.floor(Math.random() * 60),
+                            weight: +(70 + Math.random() * 5).toFixed(1),
+                            notes: `Demo entry day ${dayNumber}`,
+                            source: 'seed_demo',
+                        },
+                        $setOnInsert: { userId, date },
+                    },
+                    { upsert: true, new: true, runValidators: true, setDefaultsOnInsert: true }
+                )
+            );
+
+            moodWrites.push(
+                MoodEntry.findOneAndUpdate(
+                    { userId, date },
+                    {
+                        $set: {
+                            mood: moods[Math.floor(Math.random() * moods.length)],
+                            energyLevel: 4 + Math.floor(Math.random() * 7),
+                            stressLevel: 1 + Math.floor(Math.random() * 6),
+                            notes: `Demo mood day ${dayNumber}`,
+                            source: 'seed_demo',
+                        },
+                        $setOnInsert: { userId, date },
+                    },
+                    { upsert: true, new: true, runValidators: true, setDefaultsOnInsert: true }
+                )
+            );
         }
 
         await Promise.all([
-            HealthEntry.insertMany(healthDocs),
-            MoodEntry.insertMany(moodDocs),
+            Promise.all(healthWrites),
+            Promise.all(moodWrites),
         ]);
 
         sendSuccess(res, {
             message: '7 days of demo data seeded successfully',
-            healthEntries: healthDocs.length,
-            moodEntries: moodDocs.length,
+            healthEntries: 7,
+            moodEntries: 7,
         });
     } catch (error: unknown) {
         console.error('Seed demo error:', error);
         sendError(res, 500, 'Server error during seeding');
+    }
+});
+
+// DELETE /api/health/seed-demo — removes seeded demo rows only
+router.delete('/seed-demo', async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+        const userId = req.userId;
+        if (!userId) {
+            sendError(res, 401, 'Unauthorized');
+            return;
+        }
+
+        const [healthDeleted, moodDeleted] = await Promise.all([
+            HealthEntry.deleteMany({
+                userId,
+                $or: [
+                    { source: 'seed_demo' },
+                    { notes: DEMO_HEALTH_NOTE_PATTERN },
+                ],
+            }),
+            MoodEntry.deleteMany({
+                userId,
+                $or: [
+                    { source: 'seed_demo' },
+                    { notes: DEMO_MOOD_NOTE_PATTERN },
+                ],
+            }),
+        ]);
+
+        sendSuccess(res, {
+            message: 'Seeded demo data cleared successfully',
+            healthEntriesDeleted: healthDeleted.deletedCount ?? 0,
+            moodEntriesDeleted: moodDeleted.deletedCount ?? 0,
+        });
+    } catch (error: unknown) {
+        console.error('Clear seed demo error:', error);
+        sendError(res, 500, 'Server error during seeded data cleanup');
     }
 });
 
@@ -207,6 +284,7 @@ router.post('/', async (req: AuthRequest, res: Response): Promise<void> => {
         if (input.energyScore !== undefined) setFields.energyScore = input.energyScore;
         if (input.weight !== undefined) setFields.weight = input.weight;
         if (input.notes !== undefined) setFields.notes = input.notes;
+        setFields.source = 'health_api';
 
         const entry = await HealthEntry.findOneAndUpdate(
             { userId: req.userId, date: normalizedDate },
@@ -244,7 +322,7 @@ router.put('/:id', async (req: AuthRequest, res: Response): Promise<void> => {
     try {
         const entry = await HealthEntry.findOneAndUpdate(
             { _id: params.id, userId: req.userId },
-            body,
+            { ...body, source: 'health_api' },
             { new: true, runValidators: true }
         );
         if (!entry) {

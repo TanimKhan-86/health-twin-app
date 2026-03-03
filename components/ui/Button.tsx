@@ -8,7 +8,7 @@ import { useState } from "react";
 
 
 const buttonVariants = cva(
-    "flex-row items-center justify-center rounded-xl px-4 py-3 active:opacity-90",
+    "flex-row items-center justify-center rounded-xl px-4 py-3",
     {
         variants: {
             variant: {

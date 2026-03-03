@@ -1,8 +1,7 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator, StyleSheet } from 'react-native';
 import { ScreenLayout } from '../../components/ScreenLayout';
 import { ArrowLeft, Sparkles, Lightbulb, TrendingUp, AlertCircle, RefreshCw } from 'lucide-react-native';
-import { useFocusEffect } from '@react-navigation/native';
 import { getHealthHistory, getMoodHistory } from '../../lib/api/auth';
 import { apiFetch } from '../../lib/api/client';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -30,9 +29,7 @@ export default function AIWeeklyAnalysisScreen({ navigation }: AppScreenProps<'A
     const [error, setError] = useState<string | null>(null);
     const [healthCount, setHealthCount] = useState(0);
 
-    useFocusEffect(useCallback(() => { fetchAnalysis(); }, []));
-
-    const fetchAnalysis = async () => {
+    const fetchAnalysis = useCallback(async () => {
         setLoading(true);
         setError(null);
         try {
@@ -63,7 +60,15 @@ export default function AIWeeklyAnalysisScreen({ navigation }: AppScreenProps<'A
         } catch (err: unknown) {
             setError(err instanceof Error ? err.message : 'Could not generate your analysis. Please check your connection and try again.');
         } finally { setLoading(false); }
-    };
+    }, []);
+
+    useEffect(() => {
+        void fetchAnalysis();
+        const unsubscribe = navigation.addListener('focus', () => {
+            void fetchAnalysis();
+        });
+        return unsubscribe;
+    }, [navigation, fetchAnalysis]);
 
     return (
         <ScreenLayout gradientBackground>

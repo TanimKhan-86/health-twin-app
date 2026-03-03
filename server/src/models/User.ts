@@ -35,7 +35,6 @@ UserSchema.pre('save', async function (next) {
 
 // Compare password
 UserSchema.methods.comparePassword = function (candidate: string): Promise<boolean> {
-    console.log(`[comparePassword] Validating string length: ${candidate?.length}, raw: '${candidate}'`);
     return bcrypt.compare(candidate, this.password);
 };
 

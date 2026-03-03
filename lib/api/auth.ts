@@ -13,6 +13,7 @@ import type {
     HealthEntryDto,
     MoodEntryDto,
     MoodType,
+    ClearSeedDemoResultDto,
     StreakDataDto,
 } from './contracts';
 import { getLocalDateYmd } from '../date/localDay';
@@ -113,6 +114,11 @@ export async function getHealthHistory(limit = 30): Promise<HealthEntry[]> {
 export async function seedDemoWeek(): Promise<boolean> {
     const res = await apiFetch('/api/health/seed-demo', { method: 'POST' });
     return res.success;
+}
+
+export async function clearSeedDemoWeek(): Promise<ClearSeedDemoResultDto | null> {
+    const res = await apiFetch<ClearSeedDemoResultDto>('/api/health/seed-demo', { method: 'DELETE' });
+    return res.success ? (res.data ?? null) : null;
 }
 
 // ─── Mood Entries ─────────────────────────────────────────────────────────────

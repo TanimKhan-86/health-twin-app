@@ -26,9 +26,50 @@ import SettingsScreen from './screens/profile/SettingsScreen';
 import AvatarSetupScreen from './screens/profile/AvatarSetupScreen';
 import DatabaseViewerScreen from './screens/dev/DatabaseViewerScreen';
 import { ToastProvider } from './components/ui/Toast';
-import { ActivityIndicator, View, Text } from 'react-native';
+import { ActivityIndicator, View, Text, TextInput, Platform, TextStyle } from 'react-native';
+import { appTheme } from './lib/theme/tokens';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
+
+function applyGlobalTypographyDefaults() {
+  const TextAny = Text as unknown as {
+    defaultProps?: {
+      allowFontScaling?: boolean;
+      maxFontSizeMultiplier?: number;
+      style?: unknown;
+    };
+  };
+  const TextInputAny = TextInput as unknown as {
+    defaultProps?: {
+      allowFontScaling?: boolean;
+      maxFontSizeMultiplier?: number;
+      style?: unknown;
+    };
+  };
+
+  const textStyle: TextStyle = {
+    fontFamily: appTheme.fonts.body,
+    letterSpacing: Platform.OS === 'web' ? 0.12 : 0,
+  };
+
+  const existingTextDefaults = TextAny.defaultProps || {};
+  TextAny.defaultProps = {
+    ...existingTextDefaults,
+    allowFontScaling: existingTextDefaults.allowFontScaling ?? false,
+    maxFontSizeMultiplier: existingTextDefaults.maxFontSizeMultiplier ?? 1.1,
+    style: [existingTextDefaults.style, textStyle] as unknown,
+  };
+
+  const existingInputDefaults = TextInputAny.defaultProps || {};
+  TextInputAny.defaultProps = {
+    ...existingInputDefaults,
+    allowFontScaling: existingInputDefaults.allowFontScaling ?? false,
+    maxFontSizeMultiplier: existingInputDefaults.maxFontSizeMultiplier ?? 1.1,
+    style: [existingInputDefaults.style, { fontFamily: appTheme.fonts.body }] as unknown,
+  };
+}
+
+applyGlobalTypographyDefaults();
 
 // ─── Auth Navigator: Sign In / Sign Up ────────────────────────────────────────
 function AuthNavigator() {

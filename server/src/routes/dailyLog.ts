@@ -68,11 +68,13 @@ router.post('/', async (req: AuthRequest, res: Response): Promise<void> => {
     if (input.energyScore !== undefined) healthSet.energyScore = input.energyScore;
     if (input.weight !== undefined) healthSet.weight = input.weight;
     if (input.healthNotes !== undefined) healthSet.notes = input.healthNotes;
+    healthSet.source = 'daily_log';
 
     const moodSet: Record<string, unknown> = {
         mood: input.mood,
         energyLevel: input.energyLevel,
         stressLevel: input.stressLevel,
+        source: 'daily_log',
     };
     if (input.moodNotes !== undefined) moodSet.notes = input.moodNotes;
 

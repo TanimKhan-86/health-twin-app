@@ -180,7 +180,8 @@ export default function SignUpScreen({ navigation }: AppScreenProps<'SignUp'>) {
     };
 
     return (
-        <ScreenLayout gradientBackground className="px-6 pt-12">
+        <ScreenLayout gradientBackground>
+            <View className="flex-1 px-6 pt-12">
 
             {/* Header Area */}
             <View className="items-center mb-6">
@@ -356,7 +357,7 @@ export default function SignUpScreen({ navigation }: AppScreenProps<'SignUp'>) {
                     </TouchableOpacity>
                 )}
             </View>
-
+            </View>
         </ScreenLayout>
     );
 }

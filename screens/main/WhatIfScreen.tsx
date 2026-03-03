@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { View, Text, ScrollView, TouchableOpacity, Dimensions, StyleSheet, Platform, Image, ActivityIndicator } from "react-native";
 import Slider from "@react-native-community/slider";
 import { LineChart } from "react-native-gifted-charts";
@@ -19,6 +19,7 @@ import {
     ScenarioSlot,
     SavedScenario,
     inferSimulationAvatarDecision,
+    SCENARIO_STATES,
 } from "./whatif/scenarioUtils";
 import { useScenarioAvatarLibrary } from "./whatif/useScenarioAvatarLibrary";
 import { PageHeader } from "../../components/ui/PageHeader";
@@ -54,6 +55,8 @@ export default function WhatIfScreen({ navigation }: AppScreenProps<'WhatIf'>) {
         ensureScenarioStateVideo,
     } = useScenarioAvatarLibrary();
     const [avatarVideoFailed, setAvatarVideoFailed] = useState(false);
+    const [videoRetryKey, setVideoRetryKey] = useState(0);
+    const [videoFailureCount, setVideoFailureCount] = useState(0);
     const [scenarioA, setScenarioA] = useState<SavedScenario | null>(null);
     const [scenarioB, setScenarioB] = useState<SavedScenario | null>(null);
     const [availableLogDays, setAvailableLogDays] = useState(0);
@@ -87,26 +90,44 @@ export default function WhatIfScreen({ navigation }: AppScreenProps<'WhatIf'>) {
         [feasibility.confidence, dataConfidence.confidence]
     );
     const simulatedAvatarState = simulationDecision.state;
-    const previewVideoUrl = useMemo(
-        () =>
-            avatarVideoByState[simulatedAvatarState] ||
-            avatarVideoByState.happy ||
-            avatarVideoByState.sad ||
-            avatarVideoByState.sleepy ||
-            null,
+    const selectedStateVideoUrl = useMemo(
+        () => avatarVideoByState[simulatedAvatarState] || null,
         [avatarVideoByState, simulatedAvatarState]
     );
+    const fallbackPreviewState = useMemo(
+        () => SCENARIO_STATES.find((state) => Boolean(avatarVideoByState[state])) || null,
+        [avatarVideoByState]
+    );
+    const resolvedPreviewState = selectedStateVideoUrl ? simulatedAvatarState : fallbackPreviewState;
+    const previewVideoUrl = resolvedPreviewState ? (avatarVideoByState[resolvedPreviewState] || null) : null;
+    const previewIsFallbackState = !!resolvedPreviewState && resolvedPreviewState !== simulatedAvatarState;
+    const hasAnyScenarioVideo = useMemo(
+        () => Boolean(fallbackPreviewState),
+        [fallbackPreviewState]
+    );
     const scenarioMediaHint = useMemo(() => {
-        if (avatarLoading) return null;
-        if (previewVideoUrl && !avatarVideoFailed) return null;
+        if (previewVideoUrl && !avatarVideoFailed) {
+            if (previewIsFallbackState && resolvedPreviewState) {
+                return `Predicted ${AVATAR_STATE_META[simulatedAvatarState].label.toLowerCase()} video is not ready. Playing ${AVATAR_STATE_META[resolvedPreviewState].label.toLowerCase()} preview.`;
+            }
+            return null;
+        }
+        if (avatarLoading && !previewVideoUrl && !avatarImageUrl) return null;
+        const stateLabel = AVATAR_STATE_META[simulatedAvatarState].label;
+        if (avatarVideoFailed && previewVideoUrl) {
+            return `${stateLabel} video failed to play. Showing avatar image fallback.`;
+        }
+        if (!previewVideoUrl && hasAnyScenarioVideo && avatarImageUrl) {
+            return `${stateLabel} video is still loading. Showing avatar image fallback.`;
+        }
         if (avatarImageUrl) {
-            return 'Scenario video unavailable for this state. Showing avatar image fallback.';
+            return `No playable scenario video available right now. Showing avatar image fallback.`;
         }
         if (availableLogDays === 0) {
             return 'No logs found yet. Seed 7 days demo or log daily vitals, then generate avatar media.';
         }
         return 'Avatar setup required. Open Settings > Digital Twin Setup.';
-    }, [avatarLoading, previewVideoUrl, avatarVideoFailed, avatarImageUrl, availableLogDays]);
+    }, [previewVideoUrl, avatarVideoFailed, avatarLoading, hasAnyScenarioVideo, avatarImageUrl, simulatedAvatarState, previewIsFallbackState, resolvedPreviewState, availableLogDays]);
     const forecastData = useMemo(() => generateHabitSimulation(baselineSleep, baselinesteps, simSleep, simSteps, 30), [baselineSleep, baselinesteps, simSleep, simSteps]);
 
     const chartData = useMemo(() => forecastData.map((point) => ({
@@ -192,7 +213,46 @@ export default function WhatIfScreen({ navigation }: AppScreenProps<'WhatIf'>) {
 
     useEffect(() => {
         setAvatarVideoFailed(false);
+        setVideoFailureCount(0);
+        setVideoRetryKey((value) => value + 1);
     }, [previewVideoUrl, simulationDecision.state]);
+
+    useEffect(() => {
+        if (selectedStateVideoUrl) return;
+        let cancelled = false;
+        let timeoutId: ReturnType<typeof setTimeout> | null = null;
+        let attempts = 0;
+
+        const tryLoad = async () => {
+            if (cancelled) return;
+            attempts += 1;
+            await ensureScenarioStateVideo(simulatedAvatarState);
+            if (cancelled) return;
+            if (!selectedStateVideoUrl && attempts < 3) {
+                timeoutId = setTimeout(() => {
+                    void tryLoad();
+                }, 900);
+            }
+        };
+
+        void tryLoad();
+
+        return () => {
+            cancelled = true;
+            if (timeoutId) clearTimeout(timeoutId);
+        };
+    }, [selectedStateVideoUrl, ensureScenarioStateVideo, simulatedAvatarState]);
+
+    const handlePreviewVideoError = useCallback(() => {
+        setVideoFailureCount((count) => {
+            if (count < 2) {
+                setVideoRetryKey((value) => value + 1);
+                return count + 1;
+            }
+            setAvatarVideoFailed(true);
+            return count;
+        });
+    }, []);
 
     useEffect(() => {
         void ensureScenarioStateVideo(simulatedAvatarState);
@@ -261,25 +321,27 @@ export default function WhatIfScreen({ navigation }: AppScreenProps<'WhatIf'>) {
                                 ) : previewVideoUrl && !avatarVideoFailed ? (
                                     Platform.OS === 'web' ? (
                                         <video
-                                            key={previewVideoUrl}
+                                            key={`${previewVideoUrl}-${videoRetryKey}`}
                                             src={previewVideoUrl}
                                             autoPlay
                                             loop
                                             muted
                                             playsInline
-                                            onError={() => setAvatarVideoFailed(true)}
+                                            onLoadedData={() => setAvatarVideoFailed(false)}
+                                            onError={handlePreviewVideoError}
                                             style={WEB_VIDEO_STYLE}
                                         />
                                     ) : (
                                         <Video
-                                            key={previewVideoUrl}
+                                            key={`${previewVideoUrl}-${videoRetryKey}`}
                                             source={{ uri: previewVideoUrl }}
                                             style={styles.nativeVideo}
                                             resizeMode={ResizeMode.COVER}
                                             isMuted
                                             shouldPlay
                                             isLooping
-                                            onError={() => setAvatarVideoFailed(true)}
+                                            onLoad={() => setAvatarVideoFailed(false)}
+                                            onError={handlePreviewVideoError}
                                         />
                                     )
                                 ) : avatarImageUrl ? (
@@ -293,6 +355,11 @@ export default function WhatIfScreen({ navigation }: AppScreenProps<'WhatIf'>) {
                                     {AVATAR_STATE_META[simulatedAvatarState].label} {AVATAR_STATE_META[simulatedAvatarState].emoji}
                                 </Text>
                             </View>
+                            {previewIsFallbackState && resolvedPreviewState && (
+                                <Text style={styles.playbackStateText}>
+                                    Playing preview: {AVATAR_STATE_META[resolvedPreviewState].label} {AVATAR_STATE_META[resolvedPreviewState].emoji}
+                                </Text>
+                            )}
                             <Text style={styles.moodSubText}>Scenario model: {predictedMood}</Text>
                             {scenarioMediaHint && <Text style={styles.scenarioMediaHint}>{scenarioMediaHint}</Text>}
                             <Text style={[styles.dataConfidenceInline, { color: dataConfidenceMeta.color }]}>
@@ -622,6 +689,12 @@ const styles = StyleSheet.create({
         marginBottom: 12,
     },
     moodText: { color: '#6d28d9', fontWeight: '800', fontSize: 15 },
+    playbackStateText: {
+        color: '#5b21b6',
+        fontSize: 11,
+        fontWeight: '700',
+        marginBottom: 6,
+    },
     moodSubText: { ...appTheme.typography.caption, color: appTheme.colors.textSecondary, marginBottom: 8 },
     scenarioMediaHint: {
         color: '#64748b',

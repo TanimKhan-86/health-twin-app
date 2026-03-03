@@ -20,6 +20,7 @@ import { sendSuccess } from './lib/apiResponse';
 
 const app = express();
 const PORT = process.env.PORT || 4000;
+const HOST = process.env.HOST || '0.0.0.0';
 
 // Middleware — dynamically accept all origins for local dev Expo testing
 app.use(cors({
@@ -54,8 +55,11 @@ app.get('/', (_req, res) => {
     sendSuccess(res, { status: 'ok', message: 'Health Twin API is running' });
 });
 
-app.listen(PORT, () => {
-    console.log(`🚀 Server running on http://localhost:${PORT}`);
+app.listen(Number(PORT), HOST, () => {
+    console.log(`🚀 Server running on http://${HOST}:${PORT}`);
+    if (HOST === '0.0.0.0') {
+        console.log('🌐 Listening on all network interfaces (LAN enabled)');
+    }
 });
 
 export default app;

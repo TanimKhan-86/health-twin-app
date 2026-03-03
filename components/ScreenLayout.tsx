@@ -1,23 +1,22 @@
-import { View, ViewProps, StyleProp, ViewStyle } from "react-native";
+import type { ReactNode } from "react";
+import { View, StyleProp, ViewStyle, StyleSheet } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { StatusBar } from "expo-status-bar";
-import { cn } from "../lib/utils";
 import { appTheme, gradients } from "../lib/theme/tokens";
 
-interface ScreenLayoutProps extends ViewProps {
+interface ScreenLayoutProps {
+    children: ReactNode;
     gradientBackground?: boolean;
-    // Allows passing extra style to the outermost wrapper
     outerStyle?: StyleProp<ViewStyle>;
+    contentStyle?: StyleProp<ViewStyle>;
 }
 
 export function ScreenLayout({
     children,
-    className,
     outerStyle,
+    contentStyle,
     gradientBackground = true,
-    style,
-    ...props
 }: ScreenLayoutProps) {
     if (gradientBackground) {
         return (
@@ -25,10 +24,10 @@ export function ScreenLayout({
                 colors={gradients.screen}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 0.5, y: 1 }}
-                style={[{ flex: 1 }, outerStyle]}
+                style={[styles.flex, outerStyle]}
             >
                 <StatusBar style="dark" />
-                <SafeAreaView className={cn("flex-1", className)} style={style} {...props}>
+                <SafeAreaView style={[styles.flex, contentStyle]}>
                     {children}
                 </SafeAreaView>
             </LinearGradient>
@@ -36,11 +35,17 @@ export function ScreenLayout({
     }
 
     return (
-        <View className={cn("flex-1", className)} style={[{ backgroundColor: appTheme.colors.backgroundBottom }, style, outerStyle]} {...props}>
+        <View style={[styles.flex, { backgroundColor: appTheme.colors.backgroundBottom }, outerStyle]}>
             <StatusBar style="dark" />
-            <SafeAreaView className="flex-1">
+            <SafeAreaView style={[styles.flex, contentStyle]}>
                 {children}
             </SafeAreaView>
         </View>
     );
 }
+
+const styles = StyleSheet.create({
+    flex: {
+        flex: 1,
+    },
+});

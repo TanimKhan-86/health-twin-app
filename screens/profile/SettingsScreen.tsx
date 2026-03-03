@@ -40,13 +40,17 @@ export default function SettingsScreen({ navigation }: AppScreenProps<'Settings'
     const notificationsStorageKey = user?.id ? `healthtwin_notifications_enabled:${user.id}` : null;
 
     React.useEffect(() => {
+        setProfileAvatarUrl(user?.profileImage ?? null);
+    }, [user?.id, user?.profileImage]);
+
+    React.useEffect(() => {
         let isMounted = true;
         apiFetch<{ hasAvatar: boolean; avatarUrl?: string }>('/api/avatar/status').then((res) => {
             if (!isMounted) return;
             setProfileAvatarUrl((res.success ? res.data?.avatarUrl ?? null : null) ?? user?.profileImage ?? null);
         });
         return () => { isMounted = false; };
-    }, [user?.profileImage]);
+    }, [user?.id, user?.profileImage]);
 
     React.useEffect(() => {
         if (!notificationsStorageKey) return;

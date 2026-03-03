@@ -55,6 +55,8 @@ router.get('/:fileId', async (req, res: Response): Promise<void> => {
         res.setHeader('Last-Modified', fileDoc.uploadDate.toUTCString());
     }
 
+    const isHeadRequest = req.method === 'HEAD';
+
     if (typeof rangeHeader === 'string' && rangeHeader.trim().length > 0) {
         const parsed = parseRange(rangeHeader.trim(), totalLength);
         if (!parsed) {
@@ -67,6 +69,14 @@ router.get('/:fileId', async (req, res: Response): Promise<void> => {
         res.status(206);
         res.setHeader('Content-Length', String(chunkSize));
         res.setHeader('Content-Range', `bytes ${start}-${end}/${totalLength}`);
+        if (typeof res.flushHeaders === 'function') {
+            res.flushHeaders();
+        }
+
+        if (isHeadRequest) {
+            res.end();
+            return;
+        }
 
         const stream = bucket.openDownloadStream(objectId, { start, end: end + 1 });
         stream.on('error', () => {
@@ -82,6 +92,13 @@ router.get('/:fileId', async (req, res: Response): Promise<void> => {
 
     res.status(200);
     res.setHeader('Content-Length', String(totalLength));
+    if (typeof res.flushHeaders === 'function') {
+        res.flushHeaders();
+    }
+    if (isHeadRequest) {
+        res.end();
+        return;
+    }
     const stream = bucket.openDownloadStream(objectId);
     stream.on('error', () => {
         if (!res.headersSent) {

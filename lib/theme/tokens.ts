@@ -1,6 +1,28 @@
-import { TextStyle, ViewStyle } from 'react-native';
+import { Platform, TextStyle, ViewStyle } from 'react-native';
+
+const fontFamilies = {
+    display: Platform.select({
+        web: '"Sora", "Manrope", "Avenir Next", "Segoe UI", sans-serif',
+        ios: 'Avenir Next',
+        android: 'sans-serif-medium',
+        default: 'System',
+    }) || 'System',
+    body: Platform.select({
+        web: '"Manrope", "Avenir Next", "Segoe UI", sans-serif',
+        ios: 'Avenir Next',
+        android: 'sans-serif',
+        default: 'System',
+    }) || 'System',
+    mono: Platform.select({
+        web: '"JetBrains Mono", "SFMono-Regular", Menlo, Monaco, Consolas, monospace',
+        ios: 'Menlo',
+        android: 'monospace',
+        default: 'monospace',
+    }) || 'monospace',
+};
 
 export const appTheme = {
+    fonts: fontFamilies,
     colors: {
         backgroundTop: '#d2cbff',
         backgroundMid: '#e7e2ff',
@@ -37,14 +59,14 @@ export const appTheme = {
         xxl: 24,
     },
     typography: {
-        h1: { fontSize: 25, fontWeight: '800' as TextStyle['fontWeight'] },
-        h2: { fontSize: 20, fontWeight: '800' as TextStyle['fontWeight'] },
-        h3: { fontSize: 16, fontWeight: '700' as TextStyle['fontWeight'] },
-        body: { fontSize: 14, fontWeight: '500' as TextStyle['fontWeight'] },
-        bodyStrong: { fontSize: 14, fontWeight: '700' as TextStyle['fontWeight'] },
-        caption: { fontSize: 12, fontWeight: '600' as TextStyle['fontWeight'] },
-        overline: { fontSize: 11, fontWeight: '700' as TextStyle['fontWeight'] },
-        metric: { fontSize: 20, fontWeight: '800' as TextStyle['fontWeight'] },
+        h1: { fontFamily: fontFamilies.display, fontSize: 25, fontWeight: '800' as TextStyle['fontWeight'], letterSpacing: -0.25 },
+        h2: { fontFamily: fontFamilies.display, fontSize: 20, fontWeight: '800' as TextStyle['fontWeight'], letterSpacing: -0.15 },
+        h3: { fontFamily: fontFamilies.display, fontSize: 16, fontWeight: '700' as TextStyle['fontWeight'], letterSpacing: -0.1 },
+        body: { fontFamily: fontFamilies.body, fontSize: 14, fontWeight: '500' as TextStyle['fontWeight'], letterSpacing: 0.12 },
+        bodyStrong: { fontFamily: fontFamilies.body, fontSize: 14, fontWeight: '700' as TextStyle['fontWeight'], letterSpacing: 0.12 },
+        caption: { fontFamily: fontFamilies.body, fontSize: 12, fontWeight: '600' as TextStyle['fontWeight'], letterSpacing: 0.16 },
+        overline: { fontFamily: fontFamilies.body, fontSize: 11, fontWeight: '700' as TextStyle['fontWeight'], letterSpacing: 0.3 },
+        metric: { fontFamily: fontFamilies.display, fontSize: 20, fontWeight: '800' as TextStyle['fontWeight'], letterSpacing: -0.2 },
     },
 };
 
